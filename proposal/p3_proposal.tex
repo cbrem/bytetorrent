@@ -14,5 +14,117 @@
 \newcommand{\header}{\noindent \textbf{15-440, Spring 2014 \\ \assignment \\ Connor Brem (cbrem), Billy Wood (wtwood) \\ \duedate} \vspace{0.10in} \hrule}
 
 \begin{document}
-\header
+    \header
+
+    \section*{Description}
+
+        \begin{itemize}
+            \item bittorrent-like client and tracker
+        \end{itemize}
+
+    \section*{Structure}
+
+        \begin{itemize}
+            \item client
+                \begin{itemize}
+                    \item go or python
+                    \item can:
+                        \begin{itemize}
+                            \item create new .torrent files
+                            \item given a .torrent file, contact other clients identified in the .torrent file and request parts of a file
+                            \item serve parts of a file to other clients on request
+                            \item inform tracker when it has a piece
+                            \item report themselves when they do NOT have a piece that other clients think they do
+                        \end{itemize}
+                \end{itemize}
+            \item tracker server
+                \begin{itemize}
+                    \item go
+                    \item can
+                        \begin{itemize}
+                            \item serve .torrent files to frontend
+                            \item keep .torrent files updated
+                                \begin{itemize}
+                                    \item add/remove clients from list of clients with torrent pieces
+                                    \item get new .torrent files from frontend
+                                \end{itemize}
+                        \end{itemize}
+                \end{itemize}
+            \item tracker frontend
+                \begin{itemize}
+                    \item javascript/html
+                    \item can
+                        \begin{itemize}
+                            \item search for torrents by name
+                            \item fetch .torrent file from backend for user to download
+                            \item send new .torrent file to backend from user
+                        \end{itemize}
+                \end{itemize}
+        \end{itemize}
+
+
+    \section*{Distributed Systems Concepts}
+
+        \begin{itemize}
+            \item paxos for replicated tracker
+            \item clients backoff exponentially from other clients which appear to be unresponsive
+            \item TODO: more
+        \end{itemize}
+
+    \section*{Test Plan}
+
+        Conditions to test:
+        \begin{itemize}
+            \item kill a tracker, then try to do anything
+            \item kill a client after it has informed the tracker that it has a piece, then try to get that piece
+        \end{itemize}
+
+    \section*{Development Tiers}
+
+        \begin{itemize}
+            \item Minimum Testable Product:
+                \begin{itemize}
+                    \item Client:
+                        \begin{itemize}
+                            \item create .torrent files and send them directly to one tracker
+                            \item get pieces from other clients, given a .torrent
+                            \item serve pieces to other clients
+                            \item can fail without disrupting things
+                        \end{itemize}
+                    \item Tracker Server:
+                        \begin{itemize}
+                            \item single tracker (no paxos)
+                            \item record when there are new files
+                            \item record when new clients get pieces of files
+                        \end{itemize}
+                \end{itemize}
+            \item Target:
+                \begin{itemize}
+                    \item Client:
+                        \begin{itemize}
+                            \item self-report to tracker when client does not have a piece that other clients expect it to
+                            \item compute/create checksums on torrents to ensure security
+                        \end{itemize}
+                    \item Tracker Server:
+                        \begin{itemize}
+                            \item replicated via paxos
+                        \end{itemize}
+                \end{itemize}
+            \item Fluff:
+                \begin{itemize}
+                    \item Client:
+                        \begin{itemize}
+                            \item UI: show currently downloading/seeding files
+                        \end{itemize}
+                    \item Tracker Server:
+                        \begin{itemize}
+                            \item maintain users/manage logins
+                        \end{itemize}
+                    \item Tracker Frontend
+                \end{itemize}
+        \end{itemize}
+
+    \section*{Development Schedule}
+        TODO
+
 \end{document}
