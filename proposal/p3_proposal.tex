@@ -1,4 +1,4 @@
-\documentclass[11pt]{article}
+\documentclass[12pt]{article}
 
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -18,39 +18,52 @@
 \begin{document}
 \header
 
+%% TODO: piece -> chunk
+
 \section*{Description}
 
-% We should describe our protocol in some depth here
-ByteTorrent will be a BitTorrent-esque file-sharing protocol. 
-Our service will contain two node-types: Clients and Trackers.
-Each file will be broken into chunks, and the Tracker will maintain a list of
-which clients have which chunks.
+ByteTorrent will be a BitTorrent-esque file-sharing application.
+To run ByteTorrent, we will implement two types of nodes: clients and trackers.
+As with BitTorrent, clients will share files chunk-by-chunk. And trackers will
+inform clients that want a file about which other clients possess chunks of
+that file.
 
-Clients will connect to each other, and will attempt to trade chunks that they
-have for chunks that they want.
-As with BitTorrent, Clients will not connect to all other Clients.
-Rather, each Client will connect to a small number of neighbors,
-suggested by the Tracker.
-If a Client is unable to get a chunk from its neighbors,
-it will ask the Tracker for another Client that it can connect to.
+In order to increase reliability, trackers will be implemented as clusters,
+which use Paxos for replication. A tracker cluster should always be ``up".
+
+Clients, on the other hand, can go on- and off-line as they please without
+losing the ``right" to serve file chunks to other clients when they are online.
+To ensure this behavior, one client will never ask a tracker to remove another
+unresponsive client from the tracker's record. Instead, if one client thinks
+that another client is unresponsive, the first client will simply back off.
+
+We will implement graphical interfaces for both the client and the tracker.
+Users will be able to use the client's interface to manage downloads in
+progress and construct .torrent files. They will be able to use the tracker's
+interface to upload or browse for .torrent files.
+
 
 \section*{Structure}
 
 \subsection*{Client}
-The Client nodes will be implemented in Python.
+The Client nodes will be implemented in Go.
 They will have the following abilities:
 \begin{itemize}
 \item  Create new .torrent files and send them to a Tracker
-%\item  Given a .torrent file, contact other clients identified in the 
-%       .torrent file and request parts of a file
 \item  Given a .torrent file, connect to a Tracker identified in the
-       .torrent file and receive instructions.
-\item  Serve parts of a file to other Clients on request
-\item  Inform Tracker when it has a piece
-\item  Report themselves when they do NOT have a piece that other clients
+       .torrent file to determine which other Clients hold chunks of the
+       corresponding data file and fetch these chunks.
+\item  Serve chunks of a file to other Clients on request
+\item  Inform a Tracker when they have a chunk of a file
+\item  Report themselves when they do NOT have a chunk that other clients
        think they do
-\item  Contact Tracker when none of their neighbors have a desired piec.
-\item  Connect to a new Tracker when the current connection dies.
+\item  Detect when a Tracker node with which this client is communicating
+       becomes unresponsive, and resume communication with the new master in
+       this Tracker's cluster.
+\item  Expose some of these functions (create .torrent files, fetch file chunks)
+       through a GUI. This GUI will be implemented in Go (using go-gtk:
+       mattn.github.io/go-gtk), since the client UI should be on the same
+       machine as the rest of the client.
 \end{itemize}
 
 \subsection*{Tracker Server}
@@ -59,49 +72,48 @@ As such, we've decided to implement Trackers in Go.
 The Trackers will be able to:
 \begin{itemize}
 \item  Receive new .torrent files from Clients
-\item  Serve .torrent files to frontend
-\item  Keep .torrent files updated
-    \begin{itemize}
-    \item  Add/remove Clients from list of Clients with torrent pieces
-    \item  Get new .torrent files from frontend
-    \end{itemize}
+\item  Send existing .torrent files to Clients
+\item  Keep record of which Clients have which chunks of files
+\item  Maintain state within a cluster despite node failures (via Paxos).
+\item  Expose some of these functions (add .torrent files, fetch/browser
+       .torrent files) via a GUI. This GUI will be implemented in
+       Javascript/HTML, since it has low network requirements and users
+       will likely not be on the same machine as the tracker.
 \end{itemize}
 
-\subsection*{Tracker Frontend}
-We ultimately aim to add a Frontend for the Trackers.
-This will be done in Javascript and HTML.
-Its purpose will be to:
-\begin{itemize}
-\item  Search for torrents by name
-\item  Fetch .torrent file from backend for user to download
-\item  Send new .torrent file to backend from user
-\end{itemize}
 
 \section*{Distributed Systems Concepts}
 
 \subsection*{Clients}
 The Client nodes will be in constant contact with each other.
 They will need to be robust to neighbors dying, and Trackers dying.
+However, they must also be able to move on- and off-line without other clients
+reporting them as unresponsive.
 We plan to use exponential back-off to disengage from unresponsive connections.
 
 \subsection*{Trackers}
-All Tracker servers will maintain the same data.
-We will implement this with Paxos.
+Tracker servers will be organized into clusters.
+Within any cluster, all data will be replicated with Paxos.
+
 
 \section*{Test Plan}
 
 \subsection*{Tracker Tests}
 \begin{itemize}
-\item  Kill a Tracker in the quorum,
-       and make sure that things can still get done.
-\item  Kill a Client, forcing the Trackers to update the database.
+\item  Kill a Tracker node in a Tracker cluster,
+       and make sure that the affected Tracker cluster is still useful.
+\item  Kill a Client, forcing the Trackers to update their record of which
+       Clients have which chunks.
 \end{itemize}
 
 \subsection*{Client Tests}
 \begin{itemize}
-\item  Disengage from an unresponsive neighbor in the Client web.
-\item  Connect to a new Tracker if current one becomes unresponsive.
-\item  Ask a Client for a chunk that it does not have.
+\item  Kill a peer which has a chunk that client A wants, and ensure that
+       client A backs off and retrieves the chunk from another peer.
+\item  If some tracker in a Tracker cluster becomes unresponsive, ensure that
+       Clients find and resume communication with the new leader in the cluster.
+\item  Ask a Client for a chunk that it no longer has, and ensure that the asked
+       Client reports that it does not have the chunk.
 \end{itemize}
 
 \section*{Development Tiers}
@@ -111,15 +123,15 @@ We will implement this with Paxos.
 \item  Client:
     \begin{itemize}
     \item  Create .torrent files and send them directly to one tracker
-    \item  Get pieces from other clients, given a .torrent
-    \item  Serve pieces to other clients
+    \item  Get chunks from other clients, given a .torrent
+    \item  Serve chunks to other clients
     \item  Can fail without disrupting things
     \end{itemize}
-\item  Tracker Server:
+\item  Tracker:
     \begin{itemize}
     \item  Single tracker (no Paxos)
     \item  Record when there are new files
-    \item  Record when new clients get pieces of files
+    \item  Record when new clients get chunks of files
     \end{itemize}
 \end{itemize}
 
@@ -127,10 +139,11 @@ We will implement this with Paxos.
 \begin{itemize}
 \item  Client:
     \begin{itemize}
-    \item  Self-report to tracker when client does not have a piece that other clients expect it to
+    \item  Self-report to tracker when client does not have a chunk that other
+           clients expect it to
     \item  Compute/create checksums on torrents to ensure security
     \end{itemize}
-\item  Tracker Server:
+\item  Tracker:
     \begin{itemize}
     \item  Replicated via Paxos
     \end{itemize}
@@ -140,23 +153,19 @@ We will implement this with Paxos.
 \begin{itemize}
 \item  Client:
     \begin{itemize}
-    \item  UI: Show currently downloading/seeding files
+    \item  UI
     \end{itemize}
-\item  Tracker Server:
+\item  Tracker:
     \begin{itemize}
     \item  Maintain users/manage logins
+    \item  UI
     \end{itemize}
-\item  Tracker Frontend
 \end{itemize}
 
 \section*{Development Schedule}
 
 \subsection*{Week 1: April 14-20}
 For Week 1, our goal will be to have the Minimum Testable Product prepared.
-\begin{itemize}
-\item  Client:
-\item  Tracker:
-\end{itemize}
 
 \subsection*{Week 2: April 21-28}
 For Week 2, we will focus on getting our project to the Target Deliverable state.
