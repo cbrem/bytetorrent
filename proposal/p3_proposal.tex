@@ -9,37 +9,36 @@
 \textwidth18.5cm
 \textheight23.5cm  
  
-\newcommand{\assignment}{P3 Proposal}
-\newcommand{\duedate}{April 15, 2014}
-\newcommand{\header}{\noindent \textbf{15-440, Spring 2014 \\ \assignment \\ 
-                     Connor Brem (cbrem), Billy Wood (wtwood) \\ \duedate} 
-                     \vspace{0.10in} \hrule}
+\title{P3 Proposal: ByteTorrent}
+\author{Connor Brem\\Billy Wood}
+\date{April 15, 2014}
 
 \begin{document}
-\header
+
+\maketitle
 
 %% TODO: piece -> chunk
 
 \section*{Description}
 
 ByteTorrent will be a BitTorrent-esque file-sharing application.
-To run ByteTorrent, we will implement two types of nodes: clients and trackers.
-As with BitTorrent, clients will share files chunk-by-chunk. And trackers will
-inform clients that want a file about which other clients possess chunks of
-that file.
+To run ByteTorrent, we will implement two types of nodes: Clients and Trackers.
+As with BitTorrent, Clients will share files chunk-by-chunk. Trackers will
+inform clients which other clients possess chunks of that file.
 
-In order to increase reliability, trackers will be implemented as clusters,
-which use Paxos for replication. A tracker cluster should always be ``up".
+In order to increase reliability, Trackers will be implemented as clusters,
+which use Paxos for replication. A Tracker cluster should always be ``up''.
 
 Clients, on the other hand, can go on- and off-line as they please without
-losing the ``right" to serve file chunks to other clients when they are online.
-To ensure this behavior, one client will never ask a tracker to remove another
-unresponsive client from the tracker's record. Instead, if one client thinks
-that another client is unresponsive, the first client will simply back off.
+losing the ``right'' to serve file chunks to other Clients when they are online.
+To ensure this behavior, one Client will never ask a Tracker to remove another
+unresponsive Client from the Tracker's record. Instead, if one Client thinks
+that another Client is unresponsive, the first Client will back off.
 
-We will implement graphical interfaces for both the client and the tracker.
-Users will be able to use the client's interface to manage downloads in
-progress and construct .torrent files. They will be able to use the tracker's
+We ultimately intend to implement graphical interfaces for both
+the Client and the Tracker.
+Users will be able to use the Client's interface to manage downloads in
+progress and construct .torrent files. They will be able to use the Tracker's
 interface to upload or browse for .torrent files.
 
 
@@ -55,7 +54,7 @@ They will have the following abilities:
        corresponding data file and fetch these chunks.
 \item  Serve chunks of a file to other Clients on request
 \item  Inform a Tracker when they have a chunk of a file
-\item  Report themselves when they do NOT have a chunk that other clients
+\item  Report themselves when they do \emph{not} have a chunk that other clients
        think they do
 \item  Detect when a Tracker node with which this client is communicating
        becomes unresponsive, and resume communication with the new master in
@@ -95,70 +94,88 @@ We plan to use exponential back-off to disengage from unresponsive connections.
 Tracker servers will be organized into clusters.
 Within any cluster, all data will be replicated with Paxos.
 
-
 \section*{Test Plan}
 
 \subsection*{Tracker Tests}
 \begin{itemize}
 \item  Kill a Tracker node in a Tracker cluster,
        and make sure that the affected Tracker cluster is still useful.
-\item  Kill a Client, forcing the Trackers to update their record of which
-       Clients have which chunks.
+\item  Kill sufficiently many Trackers to stop progress,
+       and make sure that all progress halts.
+\item  Create slow Trackers,
+       and make sure that the Tracker cluster stays consistent.
 \end{itemize}
 
 \subsection*{Client Tests}
 \begin{itemize}
-\item  Kill a peer which has a chunk that client A wants, and ensure that
-       client A backs off and retrieves the chunk from another peer.
-\item  If some tracker in a Tracker cluster becomes unresponsive, ensure that
+\item  Kill a peer which has a chunk that Client $A$ wants, and ensure that
+       client $A$ backs off and retrieves the chunk from another peer.
+\item  If some Tracker in a Tracker cluster becomes unresponsive, ensure that
        Clients find and resume communication with the new leader in the cluster.
 \item  Ask a Client for a chunk that it no longer has, and ensure that the asked
        Client reports that it does not have the chunk.
+\item  Test with a slow Tracker cluster on start-up.
 \end{itemize}
 
 \section*{Development Tiers}
 
 \subsection*{Minimum Testable Product}
+Our primary goal is to create a Paxos-replicated Tracker.
+As such, our minimum product will have most of the same Tracker functionality,
+with a simplified Client program.
+In addition, our minimum product will only support a single .torrent file per
+Tracker cluster.
+
 \begin{itemize}
 \item  Client:
     \begin{itemize}
-    \item  Create .torrent files and send them directly to one tracker
-    \item  Get chunks from other clients, given a .torrent
+    \item  Get chunks from other clients
     \item  Serve chunks to other clients
     \item  Can fail without disrupting things
+    \item  Cannot create new .torrent files.
+    \item  Will not report when Client does not have a chunk
     \end{itemize}
 \item  Tracker:
     \begin{itemize}
-    \item  Single tracker (no Paxos)
-    \item  Record when there are new files
+    \item  Maintains data for a single .torrent file
+    \item  Paxos-replicated cluster
     \item  Record when new clients get chunks of files
+    \item  Does not need to receive new .torrent files
     \end{itemize}
 \end{itemize}
 
 \subsection*{Target Deliverable}
+Our target deliverable will allow for multiple .torrent files to exist on
+each Tracker cluster.
+At this stage, we also make the Client program slightly more complicated.
+
 \begin{itemize}
 \item  Client:
     \begin{itemize}
-    \item  Self-report to tracker when client does not have a chunk that other
-           clients expect it to
+    \item  Self-report to tracker when Client does not have a chunk that other
+           Clients expect it to
     \item  Compute/create checksums on torrents to ensure security
+    \item  Maintain target seed-to-leech ratio
     \end{itemize}
 \item  Tracker:
     \begin{itemize}
-    \item  Replicated via Paxos
+    \item  Record new .torrent files
     \end{itemize}
 \end{itemize}
 
 \subsection*{Stretch Goal}
+For our final development stage, we want to add user interfaces to the Client
+and Tracker, for ease of use.
+
 \begin{itemize}
 \item  Client:
     \begin{itemize}
-    \item  UI
+    \item  User Interface
     \end{itemize}
 \item  Tracker:
     \begin{itemize}
     \item  Maintain users/manage logins
-    \item  UI
+    \item  User Interface
     \end{itemize}
 \end{itemize}
 
@@ -166,12 +183,18 @@ Within any cluster, all data will be replicated with Paxos.
 
 \subsection*{Week 1: April 14-20}
 For Week 1, our goal will be to have the Minimum Testable Product prepared.
+We will primarily spend our time writing a Paxos-replicated Tracker cluster,
+and allowing Clients to send and receive chunks.
 
 \subsection*{Week 2: April 21-28}
 For Week 2, we will focus on getting our project to the Target Deliverable state.
+For this, we will mostly be working on the Client, to implement various security
+and consistency features.
+The Tracker will need minor updates, to allow the receipt of new .torrent files.
 
 \subsection*{Week 3: April 29-May 1}
 In Week 3, we will work on the Stretch Goals.
-In particular, this means working on the GUI.
+This primarily means implementing GUIs for the Tracker and Client,
+but we will also need to maintain users and manage logins.
 
 \end{document}
