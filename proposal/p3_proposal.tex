@@ -82,16 +82,23 @@ The Trackers will be able to:
 \section*{Distributed Systems Concepts}
 
 \begin{itemize}
-\item \textbf{Exponential Backoff:} The Client nodes will be in constant
-contact with each other.
-They will need to be robust to neighbors dying, and Trackers dying.
-However, they must also be able to move on- and off-line without other clients
-reporting them as unresponsive.
-We plan to use exponential back-off to disengage from unresponsive connections.
-\item \textbf{Paxos:} Tracker servers will be organized into clusters.
-Within any cluster, all data will be replicated with Paxos.
-\item \textbf{Hashing for integrity:} Torrent files will include hashes of the related data files so that clients can check the data files' integrity.
-\item \textbf{Hashing for deduplication:} Trackers will compare the hashes included with .torret files to identify different .torrents that refer to the same content.
+\item  \textbf{Exponential Backoff:} The Client nodes will be in constant
+       contact with each other.
+       They will need to be robust to neighbors dying, and Trackers dying.
+       However, they must also be able to move on- and off-line without other
+       clients reporting them as unresponsive.
+       We plan to use exponential back-off to disengage from unresponsive
+       connections.
+\item  \textbf{Paxos:} Tracker servers will be organized into clusters.
+       Within any cluster, all data will be replicated with Paxos.
+\item  \textbf{Hashing for integrity:} Torrent files will include hashes of
+       the related data files so that clients can check the data files'
+       integrity.
+\item  \textbf{Hashing for deduplication:} Trackers will compare the hashes
+       included with .torret files to identify different .torrents that refer
+       to the same content.
+\item  \textbf{RPC:} The Clients will make Remote Procedure Calls to the
+       Trackers in order to get certain pieces of data.
 \end{itemize}
 
 \section*{Test Plan}
@@ -138,7 +145,7 @@ Tracker cluster.
 \item  Tracker:
     \begin{itemize}
     \item  Maintains data for a single .torrent file
-    \item  2PC-replicated cluster
+    \item  Paxos-replicated cluster
     \item  Record when new clients get chunks of files
     \item  Does not need to receive new .torrent files
     \end{itemize}
@@ -160,7 +167,6 @@ At this stage, we also make the Client program slightly more complicated.
 \item  Tracker:
     \begin{itemize}
     \item  Record new .torrent files
-    \item  Upgrade replication from 2PC to Paxos
     \end{itemize}
 \end{itemize}
 
@@ -185,14 +191,18 @@ and Tracker, for ease of use.
 
 \subsection*{Week 1: April 14-20}
 For Week 1, our goal will be to have the Minimum Testable Product prepared.
-We will primarily spend our time writing a 2PC-replicated Tracker cluster,
+We will primarily spend our time writing a Paxos-replicated Tracker cluster,
 and allowing Clients to send and receive chunks.
 
 \subsection*{Week 2: April 21-28}
-For Week 2, we will focus on getting our project to the Target Deliverable state.
+At the beginning of Week 2, we will focus on getting our project to the Minimum
+Testable Product, with working Paxos-replication, in time for the first
+code review.
+
+From that point forward, we will work on getting our project to the
+Target Deliverable state.
 For this, we will mostly be working on the Client, to implement various security
-and consistency features. \\
-We will update the Tracker from using 2PC to using Paxos.
+and consistency features.
 The Tracker will need minor updates to allow the receipt of new .torrent files.
 
 \subsection*{Week 3: April 29-May 1}
