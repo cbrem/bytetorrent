@@ -3,6 +3,7 @@ package trackerrpc
 // These are the functions that Trackers will call on each other
 type Paxos interface {
 	RegisterServer(*RegisterArgs, *RegisterReply) error
+	GetOp(*GetArgs, *GetReply) error
 	Prepare(*PrepareArgs, *PrepareReply) error
 	Accept(*AcceptArgs, *AcceptReply) error
 	Commit(*CommitArgs, *CommitReply) error

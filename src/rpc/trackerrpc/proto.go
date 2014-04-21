@@ -11,12 +11,24 @@ const (
 	OutOfRange                  // Chunk Number out of range for file
 )
 
+type OperationType int
+
+const (
+	None   OperationType = iota
+	Add
+	Delete
+)
+
 type Operation struct {
-	// TODO
+	OpType     OperationType // Type of operation
+	ID         string        // Unique ID for the relevant torrent file
+        ChunkNum   int           // The ChunkNum being updated
+	ClientAddr string        // The host:port of the client in question
 }
 
 type Node struct {
 	HostPort string // The host:port address of tracker node
+	NodeID   int
 }
 
 type RegisterArgs struct {
@@ -26,6 +38,15 @@ type RegisterArgs struct {
 type RegisterReply struct {
 	Status   Status
 	Trackers []Node
+}
+
+type GetArgs struct {
+	SeqNum int
+}
+
+type GetReply struct {
+	Status status
+	Value  Operation
 }
 
 type PrepareArgs struct {
@@ -70,6 +91,7 @@ type ReportReply struct {
 type ConfirmArgs struct {
 	ID       string // Unique ID for the torrent
 	ChunkNum int
+	Addr     string // The address of the sender
 }
 
 type ConfirmReply struct {
