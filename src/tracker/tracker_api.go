@@ -10,6 +10,12 @@ type Tracker interface {
 	// - NotReady: If the cluster is still setting up
 	RegisterServer(*RegisterArgs, *RegisterReply) error
 
+	// GetOp returns the operation processed at the requested SeqNum
+	// Returns status:
+	// - OK: If everything worked
+	// - OutOfDate: If the server does not have that SeqNum in the log
+	GetOp(*GetArgs, *GetReply) error
+
 	// Prepare returns:
 	// - <Reject, _, _> : If PaxNum < Highest PaxNum seen
 	// - <OutOfDate, _, V> : If SeqNum < current SeqNum
@@ -46,7 +52,7 @@ type Tracker interface {
 	// - OutOfRange: The chunk number was to high (or negative)
 	ConfirmChunk(*ConfirmArgs, *ConfirmReply) error
 
-	// RequestChunk returns a list of peers with the requested chunk for the file
+	// RequestChunk returns a slice of peers with the requested chunk for the file
 	// Returns status:
 	// - OK: If everything is good
 	// - FileNotFound: ID is not a valid file
