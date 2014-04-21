@@ -13,6 +13,14 @@ import (
 // The time between RegisterServer calls from a slave server, in seconds
 const REGISTER_PERIOD = 1
 
+type PaxosType int
+
+const (
+	Prepare PaxosType = iota
+	Accept
+	Commit
+)
+
 type Register struct {
 	Args  *trackerrpc.RegisterArgs
 	Reply chan *trackerrpc.RegisterReply
@@ -53,6 +61,20 @@ type Report struct {
 	Reply chan *trackerrpc.ReportArgs
 }
 
+type PaxosReply struct {
+	Status    trackerrpc.Status
+	ReqPaxNum int
+	PaxNum    int
+	Value     trackerrpc.Operation
+	SeqNum    int
+}
+
+type PaxosBroadcast struct {
+	Type  PaxosType
+	Value trackerrpc.Operation
+	Reply chan *PaxosReply
+}
+
 type PaxosDone struct {
 	Quorum int
 	AccV   trackerrpc.Operation
@@ -67,6 +89,7 @@ type trackerServer struct {
 	registers            chan *Register
 	nodeID               int
 	trackers             []*rpc.Client
+	paxCom               [](chan *PaxosBroadcast)
 
 	// Channels for rpc calls
 	prepares             chan *Prepare
@@ -77,7 +100,7 @@ type trackerServer struct {
 	confirms             chan *Confirm
 	reports              chan *Report
 	pending              chan *trackerrpc.Operation
-	accomplished         chan *trackerrpc.Operation
+	outOfDate            chan int
 
 	// Paxos Stuff
 	myN                  int
@@ -117,6 +140,7 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		numChunks:            make(map[string]int)
 		peers:                make(map[string](map[string](struct{})))
 		trackers:             make([]*rpc.Client, numNodes)
+		outOfDate             make(chan int)
 		}
 
 	// Attempt to service connections on the given port.
@@ -431,8 +455,6 @@ func (t *trackerServer) eventHandler() {
 					Status: trackerrpc.OK,
 					Peers: peers}
 			}
-		case acc := <-t.accomplished:
-			t.commitOp(&acc.Op)
 		}
 	}
 }
@@ -515,14 +537,26 @@ func (t *trackerServer) commitPhase(done chan *PaxosDone, op &trackerrpc.Operati
 
 }
 
+func (t *trackerServer) paxosCommunicator() {
+
+}
+
 func (t *trackerServer) paxosHandler() {
 	pendingOps := list.New()
 	initPaxos := make(chan struct{})
 	prepareDone := make(chan *PaxosDone)
 	acceptDone := make(chan *PaxosDone)
 	commitDone := make(chan *PaxosDone)
+
+	prepareReply := make(chan *PaxosReply)
+	acceptReply := make(chan *PaxosReply)
+	commitReply := make(chan *PaxosReply)
 	inPaxos := false
 	backoff := 1
+	responses := 0
+	accN := 0
+	accV := trackerrpc.Operation{Type: trackerrpc.None}
+	oks := 0
 	for {
 		select {
 		case op := <-t.pending:
@@ -532,42 +566,82 @@ func (t *trackerServer) paxosHandler() {
 			}
 		case <-initPaxos:
 			inPaxos = true
-			go t.preparePhase(prepareDone)
-		case prep := <-prepareDone:
-			if prep.Quorum > (t.numNodes / 2) {
-				if prep.AccV.OpType == trackerrpc.None {
-					e := pendingOps.Front()
-					pendingOps.Remove(e)
-					op := &(e.Value.(trackerrpc.Operation))
-				} else {
-					op := &(prep.AccV)
+			responses = 0
+			// TODO
+			// Needs to update t.myN
+			for ch := range t.paxCom {
+				ch <- &PaxosBroadcast{
+					Type: Prepare,
+					Reply: prepareReply}
+			}
+		case prep := <-prepareReply:
+			if prep.ReqPaxNum == t.myN {
+				responses++
+				if prep.Status == trackerrpc.OK {
+					oks++
+					if prep.Value.Type != trackerrpc.None {
+						if prep.PaxNum > accN {
+							accN = prep.PaxNum
+							accV = prep.Value
+						}
+					}
+				} else if prep.Status == trackerrpc.OutOfDate {
+					t.outOfDate <- prep.SeqNum
 				}
-				go t.acceptPhase(acceptDone, op)
-			} else {
-				backoff = 2*backoff
-				time.Sleep(time.Second * time.Duration(backoff * REGISTER_PERIOD))
-			}
-		case acc := <-acceptDone:
-			if acc.Quorum > (t.numNodes / 2) {
-				go t.commitPhase(commitDone, &(acc.AccV))
-			} else {
-				backoff = 2*backoff
-				time.Sleep(time.Second * time.Duration(backoff * REGISTER_PERIOD))
-				initPaxos <- struct{}{}
-			}
-		case com := <-commitDone:
-			// Now that we're the leader, we reset our backoff
-			backoff = 1
 
-			// Can jump right back to the accept phase,
-			// because we are already the leader
-			if pendingOps.Len() > 0 {
-				e := pendingOps.Front()
-				pendingOps.Remove(e)
-				op := &(e.Value.(trackerrpc.Operation))
-				go t.acceptPhase(acceptDone, op)
-			} else {
-				inPaxos = false
+				if responses == t.numNodes {
+					if oks > (t.numNodes / 2) {
+						if AccV.OpType == trackerrpc.None {
+							e := pendingOps.Front()
+							pendingOps.Remove(e)
+							AccV = e.Value.(trackerrpc.Operation)
+						}
+
+						responses = 0
+						oks = 0
+						for ch := range t.paxCom {
+							ch <- &PaxosBroadcast{
+								Type: Accept,
+								Reply: acceptReply,
+								Value: &AccV}
+						}
+					} else {
+						// Did not get quorum,
+						// So wait (with exponential backoff) and try again
+						backoff = 2*backoff
+						wait := time.Second * time.Duration(backoff * REGISTER_PERIOD)
+						time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
+					}
+				}
 			}
+		case acc := <-acceptReply:
+			if acc.ReqPaxNum == t.myN {
+				responses++
+				if acc.Status == trackerrpc.OK {
+					oks++
+				}
+
+				if oks > (t.numNodes / 2) {
+					for ch := range t.paxCom {
+						ch <- &PaxosBroadcast{
+							Type: Commit,
+							Value: &AccV}
+					}
+
+					backoff = 1
+					if pendingOps.Len() > 0 {
+						// TODO
+						// Make it skip prepare phase
+						initPaxos <- struct{}{}
+					} else {
+						inPaxos = false
+					}
+				} else {
+					backoff = 2*backoff
+					wait := time.Second * time.Duration(backoff * REGISTER_PERIOD)
+					time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
+				}
+			}
+		}
 	}
 }
