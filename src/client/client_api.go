@@ -1,9 +1,5 @@
 package client
 
-// TODO: is the current torrent/client/tracker relationship good?
-// would it make more sense to create the torrent and register it on the tracker
-// in one fell swoop?
-
 // The ByteTorrent Client API.
 type Client interface {
     // GetChunk gets a chunk (i.e. a array of consecutive bytes) of a data file.
@@ -13,21 +9,22 @@ type Client interface {
     //   the requested file.
     GetChunk(*clientrpc.GetChunkArgs, *clientrpc.GetChunkReply) error
 
-    // RegisterFile registers with the Client that the file with the given
-    // Torrent is available at the given path.
-    // It also attempts to register the Torrent with the tracker nodes listed
-    // in the torrent.
+    // OfferFile associates a local file with a Torrent within the Client.
+    // It also informs the trackerNodes listed in the Torrent that this Client
+    // posesses the file.
     // After this function is called, other clients will be able to get chunks
-    // of this file from this client.
+    // of this file from this Client.
     // Throws an error if:
-    // - a file which matches the Torrent is not found at this path
-    // - the tracker nodes listed in the torrent do not accept the torrent
-    RegisterTorrent(*torrent.Torrent, path string) error
+    // - a file is not found at the given path
+    // - the Torrent is not valid (e.g. if the trackerNodes given in the Torrent
+    //   do not exist, or have no record of this Torrent)
+    OfferFile(*torrent.Torrent, path string) error
 
     // DownloadFile downloads the file with the given Torrent, and stores it at
     // the given path.
-    // Throws an error if the torrent is not valid.
-    // Otherwise, download the file asynchronously and pushes the the given
-    // channel when done.
-    DownloadFile(*torrent.Torrent, path string, done <-chan struct{}) error
+    // Blocks until the file has completely downloaded.
+    // Throws an error if:
+    // - the given torrent is not valid
+    // - the given path is not valid
+    DownloadFile(*torrent.Torrent, path string) error
 }

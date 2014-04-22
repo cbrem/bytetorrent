@@ -11,13 +11,13 @@ func New() (Client, error) {
 }
 
 func (c *client) GetChunk(args *clientrpc.GetChunkArgs, reply *clientrpc.GetChunkReply) error {
-    // TODO
+
 }
 
-func (c *client) RegisterTorrent(t *torrent.Torrent, path string) error {
-    // TODO
+func (c *client) OfferTorrent(t *torrent.Torrent, path string) error {
+
 }
 
-func (c *client) DownloadFile(t *torrent.Torrent, path string, done <-chan struct{}) error {
-    // TODO
+func (c *client) DownloadFile(*torrent.Torrent, path string) error {
+
 }

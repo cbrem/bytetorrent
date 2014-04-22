@@ -303,12 +303,6 @@ func (t *trackerServer) RequestChunk(args *trackerrpc.RequestArgs, reply *tracke
 	return nil
 }
 
-// TODO
-// What?
-func (t *trackerServer) RegisterFile(ID string) {
-
-}
-
 // Waits for all slave trackerServers to call the master's RegisterServer RPC.
 func (t *trackerServer) masterAwaitJoin() error {
 	// Initialize the array of Nodes, and create a map of all slaves that have
