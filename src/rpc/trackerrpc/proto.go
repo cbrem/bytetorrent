@@ -9,6 +9,7 @@ const (
 	NotReady                    // Trackers are still getting ready
 	FileNotFound                // ID does not exist
 	OutOfRange                  // Chunk Number out of range for file
+	InvalidID					// ID is not valid
 )
 
 type OperationType int
@@ -23,7 +24,7 @@ const (
 type Operation struct {
 	OpType     OperationType // Type of operation
 	ID         string        // Unique ID for the relevant torrent file
-        ChunkNum   int           // The ChunkNum being updated
+    ChunkNum   int           // The ChunkNum being updated
 	ClientAddr string        // The host:port of the client in question
 }
 
@@ -108,4 +109,12 @@ type RequestArgs struct {
 type RequestReply struct {
 	Status Status
 	Peers  []string // A list of host:port of peers with chunk
+}
+
+type CreateArgs struct {
+	ID string
+}
+
+type CreateReply struct {
+	Status Status
 }

@@ -14,7 +14,7 @@ type Tracker interface {
 	ReportMissing(*ReportArgs, *ReportReply) error
 	ConfirmChunk(*ConfirmArgs, *ConfirmReply) error
 	RequestChunk(*RequestArgs, *RequestReply) error
-	// ValidateID(*ValidateArgs, *ValidateReply) error
+	CreateEntry(*CreateArgs, *CreateReply) error
 }
 
 type PaxosServer struct {
