@@ -15,6 +15,7 @@ type Tracker interface {
 	ConfirmChunk(*ConfirmArgs, *UpdateReply) error
 	RequestChunk(*RequestArgs, *RequestReply) error
 	CreateEntry(*CreateArgs, *UpdateReply) error
+	GetTrackers(*TrackersArgs, *TrackersReply) error
 }
 
 type PaxosServer struct {

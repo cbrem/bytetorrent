@@ -12,6 +12,7 @@ const (
 	FileNotfound                // FileID does not exist
 	OutOfRange                  // Chunk Number out of range for file
 	InvalidID                   // ID is not valid
+	InvalidTrackers             // List of trackers was invalid (for torrent creation)
 )
 
 type OperationType int
@@ -27,6 +28,7 @@ type Operation struct {
 	OpType     OperationType   // Type of operation
 	Chunk      torrent.ChunkID // Torrent ID and chunk number
 	ClientAddr string          // The host:port of the client in question
+	Torrent    torrent.Torrent // The torrent information (if you're trying to create a torrent)
 }
 
 type Node struct {
@@ -108,4 +110,13 @@ type CreateArgs struct {
 
 type UpdateReply struct {
 	Status Status
+}
+
+type TrackersArgs struct {
+	// Intentionally Blank
+}
+
+type TrackersReply struct {
+	Status    Status
+	HostPorts []string
 }
