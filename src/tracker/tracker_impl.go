@@ -8,6 +8,8 @@ import (
 	"net/rpc"
 	"rpc/trackerrpc"
 	"runtime"
+	"sync"
+	"torrent"
 )
 
 // The time between RegisterServer calls from a slave server, in seconds
@@ -120,9 +122,10 @@ type trackerServer struct {
 	log                  map[int]trackerrpc.Operation
 
 	// Actual data storage
-	numChunks            map[string]int                     // Maps torrentID -> number of chunks
-	peers                map[string](map[string](struct{})) // Maps torrentID:chunkNum -> list of host:port with that chunk
+	torrents             map[torrent.ID]torrent.Torrent     // Map the torrentID
+	peers                map[torrent.ChunkID](map[string](struct{})) // Maps torrentID:chunkNum -> list of host:port with that chunk
 	pendingOps           *list.List
+	pendingMut           *sync.Mutex
 }
 
 func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (TrackerServer, error) {
@@ -150,8 +153,9 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		peers:                make(map[string](map[string](struct{}))),
 		trackers:             make([]*rpc.Client, numNodes),
 		outOfDate:            make(chan int),
-		paxCom:               make([](chan *PaxosBroadcast), numNodes)
-		pendingOps:           list.New()
+		paxCom:               make([](chan *PaxosBroadcast), numNodes),
+		pendingOps:           list.New(),
+		pendingMut:           &sync.Mutex{}
 		}
 
 	// Attempt to service connections on the given port.
@@ -301,12 +305,6 @@ func (t *trackerServer) RequestChunk(args *trackerrpc.RequestArgs, reply *tracke
 	t.requests <- request
 	*reply = *(<-replyChan)
 	return nil
-}
-
-// TODO
-// What?
-func (t *trackerServer) RegisterFile(ID string) {
-
 }
 
 // Waits for all slave trackerServers to call the master's RegisterServer RPC.
@@ -575,6 +573,7 @@ func (t *trackerServer) commitOp(v trackerrpc.Operation) {
 
 	// Go through the list of ops that we have pending
 	// If this is one of those, then respond
+	t.pendingMut.Lock()
 	for e := t.pendingOps.Front(); !done && e != nil; e = e.Next() {
 		pen := e.Value.(*Pending).Value
 		if pen.OpType == v.OpType && pen.ID == v.ID && pen.ChunkNum == v.ChunkNum && pen.ClientAddr == v.ClientAddr {
@@ -582,6 +581,7 @@ func (t *trackerServer) commitOp(v trackerrpc.Operation) {
 			e.Value.(*Pending).Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OK}
 		}
 	}
+	t.pendingMut.Unlock()
 }
 
 // t contacts other servers in an attempt to catch-up
@@ -672,7 +672,6 @@ func (t *trackerServer) paxosCommunicator(id int) {
 }
 
 func (t *trackerServer) paxosHandler() {
-	pendingOps := list.New()
 	initPaxos := make(chan struct{})
 	prepareReply := make(chan *PaxosReply)
 	acceptReply := make(chan *PaxosReply)
@@ -685,8 +684,9 @@ func (t *trackerServer) paxosHandler() {
 	for {
 		select {
 		case op := <-t.pending:
-			pendingOps.PushBack(op)
+			t.pendingMut.Lock()
 			t.pendingOps.PushBack(op)
+			t.pendingMut.Unlock()
 			if !inPaxos {
 				initPaxos <- struct{}{}
 			}
@@ -721,24 +721,30 @@ func (t *trackerServer) paxosHandler() {
 
 				if oks > (t.numNodes / 2) {
 					if accV.OpType == trackerrpc.None {
-						e := pendingOps.Front()
-						pendingOps.Remove(e)
-						accV = e.Value.(*Pending).Value
+						// Check that there's something in the list
+						t.pendingMut.Lock()
+						if t.pendingOps.Len() > 0 {
+							e := t.pendingOps.Front()
+							accV = e.Value.(*Pending).Value
+						}
+						t.pendingMut.Unlock()
 					}
 
-					// Broadcast the accept message
-					// First increment the myN,
-					// So that replies to previous messages will be ignored
-					t.myN += t.numNodes
-					responses = 0
-					oks = 0
-					for ch := range t.paxCom {
-						ch <- &PaxosBroadcast{
-							MyN: t.myN,
-							Type: Accept,
-							Reply: acceptReply,
-							SeqNum: t.seqNum,
-							Value: &accV}
+					if accV.OpType != trackerrpc.None {
+						// Broadcast the accept message
+						// First increment the myN,
+						// So that replies to previous messages will be ignored
+						t.myN += t.numNodes
+						responses = 0
+						oks = 0
+						for ch := range t.paxCom {
+							ch <- &PaxosBroadcast{
+								MyN: t.myN,
+								Type: Accept,
+								Reply: acceptReply,
+								SeqNum: t.seqNum,
+								Value: &accV}
+						}
 					}
 				} else {
 					// Did not get quorum,
