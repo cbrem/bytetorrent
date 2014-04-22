@@ -53,12 +53,21 @@ type Request struct {
 
 type Confirm struct {
 	Args *trackerrpc.ConfirmArgs
-	Reply chan *trackerrpc.ConfirmArgs
+	Reply chan *trackerrpc.UpdateReply
 }
 
 type Report struct {
 	Args *trackerrpc.ReportArgs
-	Reply chan *trackerrpc.ReportArgs
+	Reply chan *trackerrpc.UpdateReply
+}
+
+type Create struct {
+	Args *trackerrpc.CreateArgs
+	Reply chan *trackerrpc.UpdateReply
+
+type Pending struct {
+	Value trackerrpc.Operation
+	Reply *UpdateReply
 }
 
 type PaxosReply struct {
@@ -75,11 +84,6 @@ type PaxosBroadcast struct {
 	Value  trackerrpc.Operation
 	SeqNum int
 	Reply  chan *PaxosReply
-}
-
-type PaxosDone struct {
-	Quorum int
-	AccV   trackerrpc.Operation
 }
 
 type trackerServer struct {
@@ -101,7 +105,8 @@ type trackerServer struct {
 	requests             chan *Request
 	confirms             chan *Confirm
 	reports              chan *Report
-	pending              chan *trackerrpc.Operation
+	creates              chan *Create
+	pending              chan *Pending
 	outOfDate            chan int
 
 	// Paxos Stuff
@@ -117,6 +122,7 @@ type trackerServer struct {
 	// Actual data storage
 	numChunks            map[string]int                     // Maps torrentID -> number of chunks
 	peers                map[string](map[string](struct{})) // Maps torrentID:chunkNum -> list of host:port with that chunk
+	pendingOps           *list.List
 }
 
 func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (TrackerServer, error) {
@@ -134,6 +140,7 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		registers:            make(chan *Register),
 		reports:              make(chan *Report),
 		requests:             make(chan *Request),
+		creates:              make(chan *Create),
 		myN:                  nodeID,
                 highestN:             0,
 		accV:                 trackerrpc.Operation{OpType: trackerrpc.None},
@@ -144,6 +151,7 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		trackers:             make([]*rpc.Client, numNodes),
 		outOfDate:            make(chan int),
 		paxCom:               make([](chan *PaxosBroadcast), numNodes)
+		pendingOps:           list.New()
 		}
 
 	// Attempt to service connections on the given port.
@@ -225,7 +233,7 @@ func (t *trackerServer) GetOp(args *trackerrpc.GetArgs, reply *trackerrpc.GetRep
 	return nil
 }
 
-func (t *trackerServer) Prepare(*PrepareArgs, *PrepareReply) error {
+func (t *trackerServer) Prepare(args *trackerrpc.PrepareArgs, reply *trackerrpc.PrepareReply) error {
 	replyChan := make(chan *trackerrpc.PrepareReply)
 	prepare := &Prepare{
 		Args:  args,
@@ -235,7 +243,7 @@ func (t *trackerServer) Prepare(*PrepareArgs, *PrepareReply) error {
 	return nil
 }
 
-func (t *trackerServer) Accept(*AcceptArgs, *AcceptReply) error {
+func (t *trackerServer) Accept(args *trackerrpc.AcceptArgs, reply *trackerrpc.AcceptReply) error {
 	replyChan := make(chan *trackerrpc.AcceptReply)
 	accept := &Accept{
 		Args:  args,
@@ -245,7 +253,7 @@ func (t *trackerServer) Accept(*AcceptArgs, *AcceptReply) error {
 	return nil
 }
 
-func (t *trackerServer) Commit(*CommitArgs, *CommitReply) error {
+func (t *trackerServer) Commit(args *trackerrpc.CommitArgs, reply *trackerrpc.CommitReply) error {
 	replyChan := make(chan *trackerrpc.CommitReply)
 	commit := &Commit{
 		Args:  args,
@@ -255,8 +263,8 @@ func (t *trackerServer) Commit(*CommitArgs, *CommitReply) error {
 	return nil
 }
 
-func (t *trackerServer) ReportMissing(*ReportArgs, *ReportReply) error {
-	replyChan := make(chan *trackerrpc.ReportReply)
+func (t *trackerServer) ReportMissing(args *trackerrpc.ReportArgs, reply *trackerrpc.UpdateReply) error {
+	replyChan := make(chan *trackerrpc.UpdateReply)
 	report := &Report{
 		Args:  args,
 		Reply: replyChan}
@@ -265,8 +273,8 @@ func (t *trackerServer) ReportMissing(*ReportArgs, *ReportReply) error {
 	return nil
 }
 
-func (t *trackerServer) ConfirmChunk(*ConfirmArgs, *ConfirmReply) error {
-	replyChan := make(chan *trackerrpc.ConfirmReply)
+func (t *trackerServer) ConfirmChunk(args *trackerrpc.ConfirmArgs, reply *trackerrpc.UpdateReply) error {
+	replyChan := make(chan *trackerrpc.UpdateReply)
 	confirm := &Confirm{
 		Args:  args,
 		Reply: replyChan}
@@ -275,7 +283,17 @@ func (t *trackerServer) ConfirmChunk(*ConfirmArgs, *ConfirmReply) error {
 	return nil
 }
 
-func (t *trackerServer) RequestChunk(*RequestArgs, *RequestReply) error {
+func (t *trackerServer) CreateEntry(args *trackerrpc.CreateArgs, reply *trackerrpc.UpdateReply) error {
+	replyChan := make(chan *trackerrpc.UpdateReply)
+	create := &Create{
+		Args: args,
+		Reply: replyChan}
+	t.creates <- create
+	*reply = *(<-replyChan)
+	return nil
+}
+
+func (t *trackerServer) RequestChunk(args *trackerrpc.RequestArgs, reply *trackerrpc.RequestReply) error {
 	replyChan := make(chan *trackerrpc.RequestReply)
 	request := &Request{
 		Args:  args,
@@ -285,7 +303,11 @@ func (t *trackerServer) RequestChunk(*RequestArgs, *RequestReply) error {
 	return nil
 }
 
-func (t *trackerServer) RegisterFile(ID)
+// TODO
+// What?
+func (t *trackerServer) RegisterFile(ID string) {
+
+}
 
 // Waits for all slave trackerServers to call the master's RegisterServer RPC.
 func (t *trackerServer) masterAwaitJoin() error {
@@ -337,10 +359,6 @@ func (t *trackerServer) masterAwaitJoin() error {
 
 	// We've heard from all nodes.
 	return nil
-}
-
-func (t *trackerServer) CreateEntry(*trackerrpc.CreateArgs, *trackerrpc.CreateReply) error {
-	// TODO
 }
 
 // Waits for the master storageServer to accept a slave's RegisterServer RPC
@@ -451,10 +469,10 @@ func (t *trackerServer) eventHandler() {
 			numChunks, ok := t.numChunks[rep.Args.ID]
 			if !ok {
 				// File does not exist
-				rep.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
+				rep.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.FileNotfound}
 			} else if req.Args.ChunkNum < 0 || req.Args.ChunkNum >= numChunks {
 				// ChunkNum is not right for this file
-				rep.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
+				rep.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OutOfRange}
 			} else {
 				// Put the operation in the pending list
 				op := &trackerrpc.Operation{
@@ -462,17 +480,19 @@ func (t *trackerServer) eventHandler() {
 					ID: rep.Args.ID,
 					ChunkNum: rep.Args.ChunkNum,
 					ClientAddr: rep.Args.Addr}
-				t.pending <- op
+				t.pending <- &Pending{
+					Value: op,
+					Reply: rep.Reply}
 			}
 		case conf := <-t.confirms:
 			// A client has confirmed that it has a chunk
 			numChunks, ok := t.numChunks[conf.Args.ID]
 			if !ok {
 				// File does not exist
-				conf.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
+				conf.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.FileNotfound}
 			} else if conf.Args.ChunkNum < 0 || conf.Args.ChunkNum >= numChunks {
 				// ChunkNum is not right for this file
-				conf.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
+				conf.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OutOfRange}
 			} else {
 				// Put the operation in the pending list
 				op := &trackerrpc.Operation{
@@ -480,7 +500,26 @@ func (t *trackerServer) eventHandler() {
 					ID: conf.Args.ID,
 					ChunkNum: conf.Args.ChunkNum,
 					ClientAddr: conf.Args.Addr}
-				t.pending <- op
+				t.pending <- &Pending{
+					Value: op,
+					Reply: conf.Reply}
+			}
+		case cre := <-t.creates:
+			// A client has requested to create a new file
+			numChunks, ok := t.numChunks[conf.Args.ID]
+			if !ok {
+				// ID not in use,
+				// So make the pending request for this
+				op := &trackerrpc.Operation{
+					OpType: trackerrpc.Create,
+					ID: cre.Args.ID
+					ChunkNum: cre.Args.NumChunks}
+				t.pending <- &Pending{
+					Value: op,
+					Reply: cre.Reply}
+			} else {
+				// File already exists, so tell the client that this ID is invalid
+				cre.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.InvalidID}
 			}
 		case req := <-t.requests:
 			// A client has requested a list of users with a certain chunk
@@ -520,16 +559,30 @@ func (t *trackerServer) commitOp(v trackerrpc.Operation) {
 
 	// Now make the change
 	key := v.ID + ":" + strconv.Itoa(v.ChunkNum)
-	m, ok := peers[key]
+	m, ok := t.peers[key]
 	if !ok {
-		peers[key] = make(map[string](struct{}))
-		m = peers[key]
+		t.peers[key] = make(map[string](struct{}))
+		m = t.peers[key]
 	}
 
 	if v.OpType == trackerrpc.Add {
 		m[v.ClientAddr] = struct{}{}
 	} else if v.OpType == trackerrpc.Remove {
 		delete(m,v.ClientAddr)
+	} else if v.OpType == trackerrpc.Create {
+		t.numChunks[v.ID] = v.ChunkNum
+	}
+
+	// Go through the list of ops that we have pending
+	// If this is one of those, then respond
+	done := false
+	for e := t.pendingOps.Front(); !done && e != nil; e = e.Next() {
+		pen := e.Value.(*Pending).Value
+		if pen.OpType == v.OpType && pen.ID == v.ID && pen.ChunkNum == v.ChunkNum && pen.ClientAddr == v.ClientAddr {
+			done = true
+			t.pendingOps.Remove(e)
+			e.Value.(*Pending).Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OK}
+		}
 	}
 }
 
@@ -635,6 +688,7 @@ func (t *trackerServer) paxosHandler() {
 		select {
 		case op := <-t.pending:
 			pendingOps.PushBack(op)
+			t.pendingOps.PushBack(op)
 			if !inPaxos {
 				initPaxos <- struct{}{}
 			}
@@ -671,7 +725,7 @@ func (t *trackerServer) paxosHandler() {
 					if accV.OpType == trackerrpc.None {
 						e := pendingOps.Front()
 						pendingOps.Remove(e)
-						accV = e.Value.(trackerrpc.Operation)
+						accV = e.Value.(*Pending).Value
 					}
 
 					// Broadcast the accept message

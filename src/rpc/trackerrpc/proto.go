@@ -7,9 +7,9 @@ const (
 	Reject                      // Reject a prepare/accept request
 	OutOfDate                   // Message was for committed slot
 	NotReady                    // Trackers are still getting ready
-	FileNotFound                // ID does not exist
+	FileNotfound                // FileID does not exist
 	OutOfRange                  // Chunk Number out of range for file
-	InvalidID					// ID is not valid
+	InvalidID                   // ID is not valid
 )
 
 type OperationType int
@@ -24,7 +24,7 @@ const (
 type Operation struct {
 	OpType     OperationType // Type of operation
 	ID         string        // Unique ID for the relevant torrent file
-    ChunkNum   int           // The ChunkNum being updated
+	ChunkNum   int           // The ChunkNum being updated (or number of chunks, for create commands)
 	ClientAddr string        // The host:port of the client in question
 }
 
@@ -87,18 +87,10 @@ type ReportArgs struct {
 	ChunkNum int
 }
 
-type ReportReply struct {
-	Status Status
-}
-
 type ConfirmArgs struct {
 	ID       string // Unique ID for the torrent
 	ChunkNum int
 	Addr     string // The address of the sender
-}
-
-type ConfirmReply struct {
-	Status Status
 }
 
 type RequestArgs struct {
@@ -112,9 +104,10 @@ type RequestReply struct {
 }
 
 type CreateArgs struct {
-	ID string
+	ID        string
+	NumChunks int
 }
 
-type CreateReply struct {
+type UpdateReply struct {
 	Status Status
 }

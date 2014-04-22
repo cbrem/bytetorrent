@@ -59,7 +59,8 @@ type Tracker interface {
 	// - OutOfRange: The chunk number was too high (or negative)
 	RequestChunk(*RequestArgs, *RequestReply) error
 
-	// CreateEntry creates an entry on the tracker for a new torrent
+	// CreateEntry creates an entry on the tracker for a new torrent.
+	// Blocks until the option has been committed
 	// Returns status:
 	// - OK: If an entry was successfully created for the torrent with the
 	//   given ID

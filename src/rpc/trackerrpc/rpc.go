@@ -11,10 +11,10 @@ type Paxos interface {
 
 // These are the functions that Clients will call on Trackers
 type Tracker interface {
-	ReportMissing(*ReportArgs, *ReportReply) error
-	ConfirmChunk(*ConfirmArgs, *ConfirmReply) error
+	ReportMissing(*ReportArgs, *UpdateReply) error
+	ConfirmChunk(*ConfirmArgs, *UpdateReply) error
 	RequestChunk(*RequestArgs, *RequestReply) error
-	CreateEntry(*CreateArgs, *CreateReply) error
+	CreateEntry(*CreateArgs, *UpdateReply) error
 }
 
 type PaxosServer struct {
