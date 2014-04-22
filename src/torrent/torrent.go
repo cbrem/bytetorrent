@@ -36,7 +36,7 @@ func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) 
     var file []byte
     if file, err := ioutil.ReadFile(path); err != nil {
         // Failed to read the file at the given path.
-        return err
+        return nil, err
     }
     t.FileSize := len(file)
 
@@ -72,15 +72,15 @@ func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) 
                 // Tracker responded to CreateEntry call. If create was successful,
                 // continue creating Torrent. Otherwise, return an error.
                 switch reply.Status {
-                case trackerrpc.OK: return (t, nil)
-                case trackerrpc.InvalidID: return (nil, errors.New("Cannot create Torrent: invalid ID"))
+                case trackerrpc.OK: return t, nil
+                case trackerrpc.InvalidID: return nil, errors.New("Cannot create Torrent: invalid ID")
                 }
             }
         }
     }
 
     // No trackers responded. Cannot create Torrent.
-    return (nil, errors.New("Cannot create Torrent: Tracker unresponsive"))
+    return nil, errors.New("Cannot create Torrent: Tracker unresponsive")
 }
 
 // NumChunks returns the number of chunks into which we this Torrent's file is
@@ -108,7 +108,7 @@ func (t *Torrent) GetChunk(path string, chunkNumber int) ([]byte, error) {
 
     // Determine whether we're out of bounds.
     if start < 0 || end <= start {
-        return (nil, errors.New("Cannot get chunk: bad chunk number"))
+        return nil, errors.New("Cannot get chunk: bad chunk number")
     }
 
     // Attempt to read in the file and return a slice.
@@ -116,7 +116,7 @@ func (t *Torrent) GetChunk(path string, chunkNumber int) ([]byte, error) {
         // Failed to read the file at the given path.
         return err
     } else {
-        return file[start : end]
+        return file[start : end], nil
     }
 }
 

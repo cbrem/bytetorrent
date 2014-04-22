@@ -1,6 +1,11 @@
 package client
 
 // The ByteTorrent Client API.
+// Clients operate based on trust of Trackers and distrust of/disregard for
+// other Clients. Clients believe all data from Trackers, but check all data
+// from other clients against associated hashes to make sure that it has not
+// been tampered with. This distrust is well-founded, for Clients make no
+// attempt to ensure that the data they send to other Clients is valid or safe.
 type Client interface {
     // GetChunk gets a chunk (i.e. a array of consecutive bytes) of a data file.
     // Returns Status:
@@ -14,10 +19,10 @@ type Client interface {
     // posesses the file.
     // After this function is called, other clients will be able to get chunks
     // of this file from this Client.
-    // Throws an error if:
-    // - a file is not found at the given path
-    // - the Torrent is not valid (e.g. if the trackerNodes given in the Torrent
-    //   do not exist, or have no record of this Torrent)
+    // Does not check if the torrent or file are valid.
+    // Throws an error if the Client cannot inform trackerNodes that it
+    // possesses this file (e.g. it cannot reach trackerNodes, or trackerNodes
+    // do not know about this torrent).
     OfferFile(*torrent.Torrent, path string) error
 
     // DownloadFile downloads the file with the given Torrent, and stores it at
@@ -27,4 +32,12 @@ type Client interface {
     // - the given torrent is not valid
     // - the given path is not valid
     DownloadFile(*torrent.Torrent, path string) error
+
+    // Close shuts down this Client in an orderly manner.
+    // It writes the Client's state out to a file.
+    // Close throws an error if it is not able to write the Client's state to a
+    // file.
+    Close() error
+
+    // TODO: expose which chunks from which clients the client has
 }
