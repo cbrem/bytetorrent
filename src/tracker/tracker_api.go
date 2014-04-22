@@ -14,7 +14,7 @@ type Tracker interface {
 	// Returns status:
 	// - OK: If everything worked
 	// - OutOfDate: If the server does not have that SeqNum in the log
-	GetOp(*GetArgs, *GetReply) error
+	GetOp(*trackerrpc.GetArgs, *trackerrpc.GetReply) error
 
 	// Prepare returns:
 	// - <Reject, _, _> : If PaxNum < Highest PaxNum seen
@@ -22,17 +22,17 @@ type Tracker interface {
         //                       V is the value committed at that point in the sequence
 	// - <OK, N, V> : If PaxNum >= Highest PaxNum seen
 	//                (N,V) is (PaxNum, Value) pair of highest accepted proposal
-	Prepare(*PrepareArgs, *PrepareReply) error
+	Prepare(*trackerrpc.PrepareArgs, *trackerrpc.PrepareReply) error
 
 	// Accept returns:
 	// - <Reject> : If PaxNum < Highest PaxNum seen
 	// - <OutOfDate> : If SeqNum < current SeqNum
 	// - <OK> : Otherwise (everything went well)
-	Accept(*AcceptArgs, *AcceptReply) error
+	Accept(*trackerrpc.AcceptArgs, *trackerrpc.AcceptReply) error
 
 	// Commits a change to local memory.
 	// Does not return anything
-	Commit(*CommitArgs, *CommitReply) error
+	Commit(*trackerrpc.CommitArgs, *trackerrpc.CommitReply) error
 
 	// ReportMissing allows the Client to inform the Tracker when it
 	// does not possess a chunk that other Clients think it has.
@@ -41,7 +41,7 @@ type Tracker interface {
 	// - OK: If everything is good
 	// - FileNotFound: ID is not a valid file
 	// - OutOfRange: The chunk number was to high (or negative)
-	ReportMissing(*ReportArgs, *ReportReply) error
+	ReportMissing(*trackerrpc.ReportArgs, *trackerrpc.ReportReply) error
 
 	// ConfirmChunk allows the Client to inform the Tracker when it
 	// comes into possession of the a chunk.
@@ -50,14 +50,14 @@ type Tracker interface {
 	// - OK: If everything is good
 	// - FileNotFound: ID is not a valid file
 	// - OutOfRange: The chunk number was to high (or negative)
-	ConfirmChunk(*ConfirmArgs, *ConfirmReply) error
+	ConfirmChunk(*trackerrpc.ConfirmArgs, *trackerrpc.ConfirmReply) error
 
 	// RequestChunk returns a slice of peers with the requested chunk for the file
 	// Returns status:
 	// - OK: If everything is good
 	// - FileNotFound: ID is not a valid file
 	// - OutOfRange: The chunk number was too high (or negative)
-	RequestChunk(*RequestArgs, *RequestReply) error
+	RequestChunk(*trackerrpc.RequestArgs, *trackerrpc.RequestReply) error
 
 	// CreateEntry creates an entry on the tracker for a new torrent.
 	// Blocks until the option has been committed
@@ -65,5 +65,10 @@ type Tracker interface {
 	// - OK: If an entry was successfully created for the torrent with the
 	//   given ID
 	// - InvalidID: If there is already a torrent with this ID
-	CreateEntry(*CreateArgs, *CreateReply) error
+	// - InvalidTrackers: If the supplied list of trackers does not match the cluster
+	CreateEntry(*trackerrpc.CreateArgs, *trackerrpc.CreateReply) error
+
+	// GetTrackers returns a list of all trackers in the cluster
+	// Returns status OK, unless something went horribly wrong
+	GetTrackers(*trackerrpc.TrackersArgs, *trackerrpc.TrackersReply) error
 }
