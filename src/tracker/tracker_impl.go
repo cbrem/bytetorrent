@@ -575,11 +575,9 @@ func (t *trackerServer) commitOp(v trackerrpc.Operation) {
 
 	// Go through the list of ops that we have pending
 	// If this is one of those, then respond
-	done := false
 	for e := t.pendingOps.Front(); !done && e != nil; e = e.Next() {
 		pen := e.Value.(*Pending).Value
 		if pen.OpType == v.OpType && pen.ID == v.ID && pen.ChunkNum == v.ChunkNum && pen.ClientAddr == v.ClientAddr {
-			done = true
 			t.pendingOps.Remove(e)
 			e.Value.(*Pending).Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OK}
 		}

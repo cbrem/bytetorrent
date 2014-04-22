@@ -1,5 +1,7 @@
 package trackerrpc
 
+import "torrent"
+
 type Status int
 
 const (
@@ -22,10 +24,9 @@ const (
 )
 
 type Operation struct {
-	OpType     OperationType // Type of operation
-	ID         string        // Unique ID for the relevant torrent file
-	ChunkNum   int           // The ChunkNum being updated (or number of chunks, for create commands)
-	ClientAddr string        // The host:port of the client in question
+	OpType     OperationType   // Type of operation
+	Chunk      torrent.ChunkID // Torrent ID and chunk number
+	ClientAddr string          // The host:port of the client in question
 }
 
 type Node struct {
@@ -83,19 +84,17 @@ type CommitReply struct {
 }
 
 type ReportArgs struct {
-	ID       string // Unique ID for the torrent
-	ChunkNum int
+	Chunk    torrent.ChunkID // Torrent ID and chunk number
+	HostPort string          // host:port of the client
 }
 
 type ConfirmArgs struct {
-	ID       string // Unique ID for the torrent
-	ChunkNum int
-	Addr     string // The address of the sender
+	Chunk    torrent.ChunkID // Torrent ID and chunk number
+	HostPort string          // host:port of the client
 }
 
 type RequestArgs struct {
-	ID       string // Unique ID for the torrent
-	ChunkNum int
+	Chunk torrent.ChunkID // Torrent ID and chunk number
 }
 
 type RequestReply struct {
@@ -104,8 +103,7 @@ type RequestReply struct {
 }
 
 type CreateArgs struct {
-	ID        string
-	NumChunks int
+	Torrent torrent.Torrent
 }
 
 type UpdateReply struct {
