@@ -17,6 +17,7 @@ const (
 	None   OperationType = iota
 	Add
 	Delete
+	Create
 )
 
 type Operation struct {
@@ -58,6 +59,7 @@ type PrepareReply struct {
 	Status Status
 	PaxNum int
 	Value  Operation
+	SeqNum int
 }
 
 type AcceptArgs struct {

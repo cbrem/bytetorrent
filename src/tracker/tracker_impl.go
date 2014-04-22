@@ -70,9 +70,11 @@ type PaxosReply struct {
 }
 
 type PaxosBroadcast struct {
-	Type  PaxosType
-	Value trackerrpc.Operation
-	Reply chan *PaxosReply
+	MyN    int
+	Type   PaxosType
+	Value  trackerrpc.Operation
+	SeqNum int
+	Reply  chan *PaxosReply
 }
 
 type PaxosDone struct {
@@ -133,14 +135,15 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		reports:              make(chan *Report),
 		requests:             make(chan *Request),
 		myN:                  nodeID,
-                highestN:             0
-		accV:                 trackerrpc.Operation{OpType: trackerrpc.None}
-		seqNum:               0
-		log:                  make(map[int]trackerrpc.Opeartion)
-		numChunks:            make(map[string]int)
-		peers:                make(map[string](map[string](struct{})))
-		trackers:             make([]*rpc.Client, numNodes)
-		outOfDate             make(chan int)
+                highestN:             0,
+		accV:                 trackerrpc.Operation{OpType: trackerrpc.None},
+		seqNum:               0,
+		log:                  make(map[int]trackerrpc.Opeartion),
+		numChunks:            make(map[string]int),
+		peers:                make(map[string](map[string](struct{}))),
+		trackers:             make([]*rpc.Client, numNodes),
+		outOfDate:            make(chan int),
+		paxCom:               make([](chan *PaxosBroadcast), numNodes)
 		}
 
 	// Attempt to service connections on the given port.
@@ -379,59 +382,93 @@ func (t *trackerServer) eventHandler() {
 	for {
 		select {
 		case prep := <-t.prepares:
-			reply := trackerrpc.PrepareReply{
-				PaxNum: accN,
-				Value:  accV}
+			// Handle prepare messages
+			reply := &trackerrpc.PrepareReply{
+				PaxNum: t.accN,
+				Value:  t.accV,
+				SeqNum: t.seqNum}
 			if prep.Args.SeqNum != t.seqNum {
 				if prep.Args.SeqNum < t.seqNum {
+					// Other guy is out of date,
+					// Let him know and send the correct value
 					reply.Status = trackerrpc.OutOfDate
+					reply.Value = t.log[prep.Args.SeqNum]
+					prep.Reply <- reply
 				} else {
 					// This tracker is out of date
 					// It should not be validating updates
 					reply.Status = trackerrpc.Reject
-					prep.Reply <- &reply
-					t.catchUp(prep.Args.SeqNum)
+					prep.Reply <- reply
+					t.outOfDate <- prep.Args.SeqNum
 				}
 			} else if prep.Args.PaxNum < t.highestN {
 				reply.Status = trackerrpc.Reject
-				prep.Reply <- &reply
+				prep.Reply <- reply
 			} else {
+				t.highestN = prep.Args.PaxNum
 				reply.Status = trackerrpc.OK
-				prep.Reply <- &reply
+				prep.Reply <- reply
 			}
 		case acc := <-t.accepts:
+			// Handle accept messages
 			if acc.Args.SeqNum < t.seqNum {
 				status = trackerrpc.OutOfDate
 			} else if acc.Args.PaxNum < t.highestN {
 				status = trackerrpc.Reject
 			} else {
 				status = trackerrpc.OK
+				t.highestN = acc.Args.PaxNum
 				t.accN = acc.Args.PaxNum
 				t.accV = acc.Args.Value
 			}
 			acc.Reply <- &trackerrpc.AcceptReply{Status: status}
 		case com := <-t.commits:
+			// Handle commit messages
 			v := com.Args.Value
-			t.commitOp(v)
+			if v.SeqNum == t.seqNum {
+				t.commitOp(v)
+			}
 			com.Reply <- &trackerrpc.CommitReply{}
 		case get := <-t.gets:
+			// Another tracker has requested a previously commited op
 			s := gets.Args.SeqNum
 			if s > t.seqNum {
 				get.Reply <- &trackerrpc.GetReply{Status: trackerrpc.OutOfDate}
+				t.outOfDate <- s
 			} else {
 				get.Reply <- &trackerrpc.GetReply{
 					Status: trackerrpc.OK,
 					Value:  t.log[s]}
-				t.catchUp(s)
 			}
 		case rep := <-t.reports:
-		case conf := <-t.confirms:
-			numChunks, ok := t.numChunks[req.Args.ID]
+			// A client has reported that it does not have a chunk
+			numChunks, ok := t.numChunks[rep.Args.ID]
 			if !ok {
-				req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
+				// File does not exist
+				rep.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
 			} else if req.Args.ChunkNum < 0 || req.Args.ChunkNum >= numChunks {
-				req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
+				// ChunkNum is not right for this file
+				rep.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
 			} else {
+				// Put the operation in the pending list
+				op := &trackerrpc.Operation{
+					OpType: trackerrpc.Delete,
+					ID: rep.Args.ID,
+					ChunkNum: rep.Args.ChunkNum,
+					ClientAddr: rep.Args.Addr}
+				t.pending <- op
+			}
+		case conf := <-t.confirms:
+			// A client has confirmed that it has a chunk
+			numChunks, ok := t.numChunks[conf.Args.ID]
+			if !ok {
+				// File does not exist
+				conf.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
+			} else if conf.Args.ChunkNum < 0 || conf.Args.ChunkNum >= numChunks {
+				// ChunkNum is not right for this file
+				conf.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
+			} else {
+				// Put the operation in the pending list
 				op := &trackerrpc.Operation{
 					OpType: trackerrpc.Add,
 					ID: conf.Args.ID,
@@ -440,12 +477,16 @@ func (t *trackerServer) eventHandler() {
 				t.pending <- op
 			}
 		case req := <-t.requests:
+			// A client has requested a list of users with a certain chunk
 			numChunks, ok := t.numChunks[req.Args.ID]
 			if !ok {
+				// File does not exist
 				req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
 			} else if req.Args.ChunkNum < 0 || req.Args.ChunkNum >= numChunks {
+				// ChunkNum is not right for this file
 				req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
 			} else {
+				// Get a list of all peers, then respond
 				key := req.Args.ID + ":" + strconv.Itoa(req.Args.ChunkNum)
 				peers := make([]string, 0)
 				for k, _ := range t.peers[key] {
@@ -455,6 +496,10 @@ func (t *trackerServer) eventHandler() {
 					Status: trackerrpc.OK,
 					Peers: peers}
 			}
+		case seqNum := <-t.outOfDate:
+			// t is out of date
+			// Needs to catch up to seqNum
+			t.catchUp(seqNum)
 		}
 	}
 }
@@ -519,38 +564,61 @@ func (t *trackerServer) catchUp(target int) {
 	}
 }
 
-// Sends prepare messages to everyone
-// Sends results back through the channel
-func (t *trackerServer) preparePhase(done chan *PaxosDone) {
-
-}
-
-// Sends accept messages to everyone
-// Sends results back through channel
-func (t *trackerServer) acceptPhase(done chan *PaxosDone, op &trackerrpc.Operation) {
-
-}
-
-// Sends commit messages to everyone
-// Writes back when it gets at least one reply
-func (t *trackerServer) commitPhase(done chan *PaxosDone, op &trackerrpc.Operation) {
-
-}
-
-func (t *trackerServer) paxosCommunicator() {
-
+// A function to send Prepare, Accept, and Commit messages
+// to a single node in the Paxos cluster
+func (t *trackerServer) paxosCommunicator(id int) {
+	for {
+		select {
+		case mess := <-t.paxCom[id]:
+			reqPaxNum := mess.MyN
+			if mess.Type == Prepare {
+				args := &trackerrpc.PrepareArgs{
+					PaxNum: reqPaxNum,
+					SeqNum: mess.seqNum}
+				reply := &trackerrpc.PrepareReply{}
+				if err := t.trackers[id].Call("Paxos.Prepare", args, reply); err != nil {
+					// Error: Tell the paxosHandler that we were "rejected"
+					mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
+				} else {
+					// Pass the data back to the PaxosHandler
+					mess.Reply <- &PaxosReply{
+						Status: reply.Status,
+						ReqPaxNum: reqPaxNum,
+						PaxNum: reply.PaxNum,
+						Value: reply.Value,
+						SeqNum: reply.SeqNum}
+				}
+			} else if mess.Type == Accept {
+				args := &trackerrpc.AcceptArgs{
+					PaxNum: reqPaxNum,
+					SeqNum: mess.seqNum,
+					Value: mess.Value}
+				reply := &trackerrpc.AcceptReply{}
+				if err := t.trackers[id].Call("Paxos.Accept", args, reply); err != nil {
+					// Error: Tell the paxosHandler that we were "rejected"
+					mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
+				} else {
+					mess.Reply <- &PaxosReply{
+						Status: reply.Status,
+						ReqPaxNum: reqPaxNum,
+						SeqNum: mess.seqNum}
+				}
+			} else if mess.Type == Commit {
+				args := &trackerrpc.CommitArgs{
+					SeqNum: mess.seqNum,
+					Value: mess.Value}
+				reply := &trackerrpc.CommitReply{}
+				t.trackers[id].Call("Paxos.Commit", args, reply)
+			}
+		}
+	}
 }
 
 func (t *trackerServer) paxosHandler() {
 	pendingOps := list.New()
 	initPaxos := make(chan struct{})
-	prepareDone := make(chan *PaxosDone)
-	acceptDone := make(chan *PaxosDone)
-	commitDone := make(chan *PaxosDone)
-
 	prepareReply := make(chan *PaxosReply)
 	acceptReply := make(chan *PaxosReply)
-	commitReply := make(chan *PaxosReply)
 	inPaxos := false
 	backoff := 1
 	responses := 0
@@ -566,15 +634,19 @@ func (t *trackerServer) paxosHandler() {
 			}
 		case <-initPaxos:
 			inPaxos = true
+			t.myN = (t.highestN - (t.highestN % t.numNodes)) + (t.numNodes + t.nodeID)
+			backoff = 1
 			responses = 0
-			// TODO
-			// Needs to update t.myN
+			oks = 0
 			for ch := range t.paxCom {
 				ch <- &PaxosBroadcast{
+					MyN: t.myN,
 					Type: Prepare,
-					Reply: prepareReply}
+					Reply: prepareReply,
+					SeqNum: t.seqNum}
 			}
 		case prep := <-prepareReply:
+			// First check that this is a response to the current PaxosMessage
 			if prep.ReqPaxNum == t.myN {
 				responses++
 				if prep.Status == trackerrpc.OK {
@@ -589,33 +661,38 @@ func (t *trackerServer) paxosHandler() {
 					t.outOfDate <- prep.SeqNum
 				}
 
-				if responses == t.numNodes {
-					if oks > (t.numNodes / 2) {
-						if AccV.OpType == trackerrpc.None {
-							e := pendingOps.Front()
-							pendingOps.Remove(e)
-							AccV = e.Value.(trackerrpc.Operation)
-						}
-
-						responses = 0
-						oks = 0
-						for ch := range t.paxCom {
-							ch <- &PaxosBroadcast{
-								Type: Accept,
-								Reply: acceptReply,
-								Value: &AccV}
-						}
-					} else {
-						// Did not get quorum,
-						// So wait (with exponential backoff) and try again
-						backoff = 2*backoff
-						wait := time.Second * time.Duration(backoff * REGISTER_PERIOD)
-						time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
+				if oks > (t.numNodes / 2) {
+					if accV.OpType == trackerrpc.None {
+						e := pendingOps.Front()
+						pendingOps.Remove(e)
+						accV = e.Value.(trackerrpc.Operation)
 					}
+
+					// Broadcast the accept message
+					// First increment the myN,
+					// So that replies to previous messages will be ignored
+					t.myN += t.numNodes
+					responses = 0
+					oks = 0
+					for ch := range t.paxCom {
+						ch <- &PaxosBroadcast{
+							MyN: t.myN,
+							Type: Accept,
+							Reply: acceptReply,
+							SeqNum: t.seqNum,
+							Value: &accV}
+					}
+				} else {
+					// Did not get quorum,
+					// So wait (with exponential backoff) and try again
+					backoff = 2*backoff
+					wait := time.Second * time.Duration(backoff * REGISTER_PERIOD)
+					time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
 				}
 			}
 		case acc := <-acceptReply:
-			if acc.ReqPaxNum == t.myN {
+			// Received the reply to an accept message
+			if acc.ReqPaxNum == t.myN && inPaxos {
 				responses++
 				if acc.Status == trackerrpc.OK {
 					oks++
@@ -624,11 +701,12 @@ func (t *trackerServer) paxosHandler() {
 				if oks > (t.numNodes / 2) {
 					for ch := range t.paxCom {
 						ch <- &PaxosBroadcast{
+							MyN: t.myN,
 							Type: Commit,
-							Value: &AccV}
+							SeqNum: t.seqNum,
+							Value: &accV}
 					}
 
-					backoff = 1
 					if pendingOps.Len() > 0 {
 						// TODO
 						// Make it skip prepare phase
