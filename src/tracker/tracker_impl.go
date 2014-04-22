@@ -282,6 +282,8 @@ func (t *trackerServer) RequestChunk(*RequestArgs, *RequestReply) error {
 	return nil
 }
 
+func (t *trackerServer) RegisterFile(ID)
+
 // Waits for all slave trackerServers to call the master's RegisterServer RPC.
 func (t *trackerServer) masterAwaitJoin() error {
 	// Initialize the array of Nodes, and create a map of all slaves that have
@@ -332,6 +334,10 @@ func (t *trackerServer) masterAwaitJoin() error {
 
 	// We've heard from all nodes.
 	return nil
+}
+
+func (t *trackerServer) CreateEntry(*trackerrpc.CreateArgs, *trackerrpc.CreateReply) error {
+	// TODO
 }
 
 // Waits for the master storageServer to accept a slave's RegisterServer RPC

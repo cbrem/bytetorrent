@@ -58,4 +58,11 @@ type Tracker interface {
 	// - FileNotFound: ID is not a valid file
 	// - OutOfRange: The chunk number was too high (or negative)
 	RequestChunk(*RequestArgs, *RequestReply) error
+
+	// CreateEntry creates an entry on the tracker for a new torrent
+	// Returns status:
+	// - OK: If an entry was successfully created for the torrent with the
+	//   given ID
+	// - InvalidID: If there is already a torrent with this ID
+	CreateEntry(*CreateArgs, *CreateReply) error
 }
