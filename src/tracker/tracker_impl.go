@@ -518,6 +518,9 @@ func (t *trackerServer) eventHandler() {
 					Reply: conf.Reply}
 			}
 		case cre := <-t.creates:
+			// TODO
+			// Check that the torrent has all (and exactly) the trackers in the paxos cluster
+
 			// A client has requested to create a new file
 			tor, ok := t.tor[cre.Args.Torrent.ID]
 			if !ok {
@@ -553,6 +556,7 @@ func (t *trackerServer) eventHandler() {
 					Peers:  peers}
 			}
 		case gt := <-t.getTrackers:
+			// A client has requested a list of users with a certain chunk
 			hostPorts := make([]string, t.numNodes)
 			for i, node := range t.nodes {
 				hostPorts[i] = node.HostPort
