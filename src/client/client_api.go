@@ -12,7 +12,7 @@ type Client interface {
     // - OK: If the reply contains the requested chunk.
     // - ChunkNotFound: If the Client does not contain the requested chunk for
     //   the requested file.
-    GetChunk(*clientrpc.GetChunkArgs, *clientrpc.GetChunkReply) error
+    GetChunk(*torrent.ChunkID, *clientrpc.GetChunkReply) error
 
     // OfferFile associates a local file with a Torrent within the Client.
     // It also informs the trackerNodes listed in the Torrent that this Client

@@ -8,8 +8,7 @@ const (
 )
 
 type GetArgs struct {
-    ID         string        // Unique ID for the relevant torrent file
-    ChunkNum   int           // The ChunkNum being updated
+    torrent.ChunkID // ID and chunk number for the relevant torrent chunk
 }
 
 type GetReply struct {
