@@ -31,16 +31,20 @@
 
 // TODO: change size in torrent to an int64?
 
-package torrent
+package client
 
 import (
     "crypto/sha1"
-    "io/ioutil"
-    "rpc"
+    "errors"
+    "os"
+    "net/rpc"
+
+    "rpc/trackerrpc"
 )
 
 const (
-    DEFAULT_CHUNK_SIZE int 1000 // Number of bytes per chunk
+    DEFAULT_CHUNK_SIZE int = 1000 // Number of bytes per chunk
+    MODE int = 644 // Mode for writing torrent files.
 )
 
 // New creates a new Torrent for the file at the given path.
@@ -58,14 +62,15 @@ const (
 // (name, file_hash) (i.e. the same id). if we didn't do this, then it would be
 // possible (though very difficult) to create two torrents for different files
 // which share the same entry on the trackers.
-func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) {
+func New(path string, name string, trackerNodes []TrackerNode) (*torrent.Torrent, error) {
     t := & Torrent {
-        Name: name,
-        TrackerNodes: trackerNodes[:], // TODO: do we need to copy here?
-        ChunkSize: DEFAULT_CHUNK_SIZE}
+        TrackerNodes: trackerNodes,
+        ChunkSize: DEFAULT_CHUNK_SIZE,
+        ChunkHashes: make(map[int]byte)}
 
     // Attempt to find the file with the given path.
-    var file *os.File, fi os.FileInfo
+    var file *os.File
+    var fi os.FileInfo
     if file, err := os.Open(path); err != nil {
         // Failed to read the file at the given path.
         return nil, err
@@ -74,11 +79,11 @@ func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) 
         // Failed to get information about the file.
         return nil, err
     }
-    t.FileSize := int(fi.Size())
+    t.FileSize = int(fi.Size())
 
     // Read the file's contents.
-    fileBytes := make([]byte, t.FileSize)
-    if _, err := file.Read(fileBytes); err != nil {
+    bytes := make([]byte, t.FileSize)
+    if _, err := file.Read(bytes); err != nil {
         // Failed to read file contents.
         return nil, err
     }
@@ -86,16 +91,18 @@ func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) 
     // Hash the entire file we just read.
     // Use this to determine the Torrent's ID.
     h := sha1.New()
-    h.Write(fileBytes)
+    h.Write(bytes)
     t.ID = ID {Name: name, Hash: h.Sum(nil)}
 
     // Record hashes for every chunk.
-    t.ChunkHashes = make(map[int]byte)
     for chunkNum := 0; chunkNum < t.NumChunks(); chunkNum++ {
-        chunk := t.GetChunk(file, chunkNum)
-        h.Reset()
-        h.Write(chunk)
-        t.ChunkHashes[chunkNum] = h.Sum(nil)
+        if chunk, err := t.GetChunk(file, chunkNum); err != nil {
+            return nil, err
+        } else {
+            h.Reset()
+            h.Write(chunk)
+            t.ChunkHashes[chunkNum] = h.Sum(nil)
+        }
     }
 
     // Attempt to create an entry for this torrent on the trackers.
@@ -111,7 +118,7 @@ func New(path string, name string, trackerNodes []TrackerNode) (Torrent, error) 
 //
 // TODO: should this return info about what the error was?...or otherwise help
 // us to recover in the case that we have the wrong list of tracker nodes?
-func (t *Torrent) CreateEntry() error {
+func (t *torrent.Torrent) CreateEntry() error {
     // Attempt to contact one of the tracker nodes and create an entry for this
     // ID.
     //
@@ -119,7 +126,7 @@ func (t *Torrent) CreateEntry() error {
     // ...if we somehow forget that we created the torrent, our guarantees break... and
     // what if we do create on the tracker, but the client doesn't find out...would it
     // be blocked from ever creating a torrent with the name it wants to?
-    for _, trackerNode := range trackerNodes {
+    for _, trackerNode := range t.trackerNodes {
         if conn, err := rpc.DialHTTP("tcp", trackerNode.HostPort); err == nil {
             // We found a live node in the tracker cluster.
             args := & trackerrpc.CreateArgs {Torrent: t}
@@ -154,9 +161,9 @@ func (t *Torrent) CreateEntry() error {
 
 // NumChunks returns the number of chunks into which we this Torrent's file is
 // divided.
-func (t *Torrent) NumChunks() int {
+func (t *torrent.Torrent) NumChunks() int {
     if t.FileSize % t.ChunkSize == 0 {
-        return t.FileSize / t.ChunkSize, 
+        return t.FileSize / t.ChunkSize
     } else {
         // Round up.
         return (t.FileSize / t.ChunkSize) + 1
@@ -165,18 +172,18 @@ func (t *Torrent) NumChunks() int {
 
 // GetChunk returns a the chunk with the given number from this Torrent.
 // If the given number is out of range, it returns a non-nil error.
-func (t *Torrent) GetChunk(file *os.File, chunkNum int) ([]byte, error) {
+func (t *torrent.Torrent) GetChunk(file *os.File, chunkNum int) ([]byte, error) {
     if start, length, err := t.getChunkBounds(chunkNum); err != nil {
         // Bad chunk number.
-        return [], err // TODO: [] is the empty val for a slice, right?
+        return nil, err
     } else {
         bytes := make([]byte, length)
         if bytesRead, err := file.ReadAt(bytes, start); err != nil {
             // Read failed.
-            return [], err
+            return nil, err
         } else if bytesRead != length {
             // Read wrong number of bytes.
-            return [], errors.New("Read wrong number of bytes")
+            return nil, errors.New("Read wrong number of bytes")
         } else {
             return bytes, nil
         }
@@ -186,7 +193,7 @@ func (t *Torrent) GetChunk(file *os.File, chunkNum int) ([]byte, error) {
 // SetChunk writes the given chunk at the position for the given chunk number
 // in the given file.
 // It returns a non-nil error if the write fails.
-func (t *Torrent) SetChunk(file *os.File, chunkNum int, chunk []byte) error {
+func (t *torrent.Torrent) SetChunk(file *os.File, chunkNum int, chunk []byte) error {
     var start, length int
     if start, length, err := t.getChunkBounds(chunkNum); err != nil {
         // Bad chunk number.
@@ -219,9 +226,35 @@ func (t *Torrent) SetChunk(file *os.File, chunkNum int, chunk []byte) error {
     }
 }
 
+// ToFile serializes a torrent and writes it out to the given file.
+func (t *torrent.Torrent) ToFile(path string) error {
+    if bytes, err := json.Marshal(t); err != nil {
+        return err
+    } else if err := ioutil.WriteFile(path, bytes, MODE); err != nil {
+        return err
+    } else {
+        // Successfully wrote Torrent to file.
+        return nil
+    }
+}
+
+// FromFile creates a Torrent from the file at the given path.
+// This assumes that the Torrent at the given path was created using ToFile.
+func FromFile(path string) (*torrent.Torrent, err) {
+    var t torrent.Torrent
+    if bytes, err := ioutil.ReadFile(path); err != nil {
+        return nil, err
+    } else if err := json.Unmarshal(bytes, &t); err != nil {
+        return nil, err
+    } else {
+        // Successfully created Torrent from file.
+        return &t, nil
+    }
+}
+
 // getChunkBounds returns the start and length of the given chunk.
 // Returns a non-nil error if the chunk number is invalid for this Torrent.
-func (t *Torrent) getChunkBounds(chunkNum int) (int, int, error) {
+func (t *torrent.Torrent) getChunkBounds(chunkNum int) (int, int, error) {
     var start, length int
     start = chunkNum * t.ChunkSize
     if t.ChunkSize < t.FileSize - start {
