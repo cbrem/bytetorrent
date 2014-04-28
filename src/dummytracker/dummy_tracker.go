@@ -3,6 +3,8 @@
 // Tracker for tests which only wish to examine Client/Torrent functionality.
 // This implementation uses a singer node instead of a Paxos cluster.
 
+package dummytracker
+
 type Request struct {
     Args  *trackerrpc.RequestArgs
     Reply chan *trackerrpc.RequestReply
