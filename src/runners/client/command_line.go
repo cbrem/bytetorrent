@@ -18,14 +18,16 @@ const (
 
 var (
     USAGE string = strings.Join([]string{
-        "USAGE:",
-        "<program_name> <client host:port> <tracker 0 host:port> ... <tracker n-1 host:port>"}, "\n")
+        "Usage:",
+        "\t<program_name> <client host:port> <tracker 0 host:port> ... <tracker n-1 host:port>",
+        ""}, "\n")
     COMMANDS string = strings.Join([]string{
-        "COMMANDS:",
-        "CREATE <file_path> <torrent_path> <name>",
-        "OFFER <file_path> <torrent_path>",
-        "DOWNLOAD <file_path> <torrent_path>",
-        "EXIT"}, "\n")
+        "Command:",
+        "\tCREATE <file_path> <torrent_path> <name>",
+        "\tOFFER <file_path> <torrent_path>",
+        "\tDOWNLOAD <file_path> <torrent_path>",
+        "\tEXIT",
+        ""}, "\n")
 )
 
 // A listener which updates the view when the Client changes local files.
@@ -53,6 +55,8 @@ func changeToString(change *client.LocalFileChange) string {
 
 // processInputs gets inputs from users and acts on them.
 func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile, trackerNodes []torrent.TrackerNode) {
+    fmt.Println(COMMANDS)
+
     var cmd, filePath, torrentPath, name string
     for {
         fmt.Scanln(&cmd, &filePath, &torrentPath, &name)
@@ -62,9 +66,9 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             if filePath == "" || torrentPath == "" || name == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := client.NewTorrent(filePath, name, trackerNodes); err != nil {
-                fmt.Println("Could not create torrent")
+                fmt.Println("Could not create torrent", err)
             } else if err := client.ToFile(t, torrentPath); err != nil {
-                fmt.Println("Could not write torrent")
+                fmt.Println("Could not write torrent", err)
             }
 
         case "OFFER":
@@ -72,9 +76,9 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := client.LoadTorrent(torrentPath); err != nil {
-                fmt.Println("Could not read torrent file")
+                fmt.Println("Could not read torrent file", err)
             } else if err := c.OfferFile(t, filePath); err != nil {
-                fmt.Println("Could not offer data file")
+                fmt.Println("Could not offer data file", err)
             }
 
         case "DOWNLOAD":
@@ -82,17 +86,17 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := client.LoadTorrent(torrentPath); err != nil {
-                fmt.Println("Could not read torrent file")
+                fmt.Println("Could not read torrent file", err)
             } else if err := c.DownloadFile(t, filePath); err != nil {
-                fmt.Println("Could not download data file")
+                fmt.Println("Could not download data file", err)
             }
 
         case "EXIT":
             // Save the client's state to a file.
             if localFilesBytes, err := json.Marshal(localFiles); err != nil {
-                fmt.Println("Could not save client state")
+                fmt.Println("Could not save client state", err)
             } else if err := ioutil.WriteFile(SAVE_PATH, localFilesBytes, MODE); err != nil {
-                fmt.Println("Could not save client state")
+                fmt.Println("Could not save client state", err)
             }
 
             // Quit.
@@ -112,9 +116,9 @@ func main() {
     // Load saved localFiles, if they exist.
     var localFiles map[torrent.ID]*client.LocalFile
     if savedBytes, err := ioutil.ReadFile(SAVE_PATH); err != nil {
-        fmt.Println("Could not find saved state")
+        fmt.Println("Could not find saved state", err)
     } else if err := json.Unmarshal(savedBytes, localFiles); err != nil {
-        fmt.Println("Could not read saved state")
+        fmt.Println("Could not read saved state", err)
         localFiles = make(map[torrent.ID]*client.LocalFile)
     }
 
@@ -135,7 +139,7 @@ func main() {
     // Create an start a Client.
     lfl := & clientFileListener {}
     if c, err := client.NewClient(localFiles, lfl, clientHostPort); err != nil {
-        fmt.Println("Could not start client")
+        fmt.Println("Could not start client", err)
     } else {
         // Accept commands from stdin until the user exits.
         processInputs(c, localFiles, trackerNodes)
