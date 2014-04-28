@@ -26,7 +26,7 @@ func WrapPaxos(p Paxos) Paxos {
 	return &PaxosServer{p}
 }
 
-type TrackerServer {
+type TrackerServer struct {
 	Tracker
 }
 

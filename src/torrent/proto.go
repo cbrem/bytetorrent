@@ -23,7 +23,7 @@ type ChunkID struct {
 // Contains information about how to fetch 
 type Torrent struct {
     ID
-    ChunkHashes map[int]byte
+    ChunkHashes map[int]string // Map from ChunkNums -> string(sha1 hash)
     TrackerNodes []TrackerNode // The nodes in the tracker with which this torrent is registered
     ChunkSize int
     FileSize int

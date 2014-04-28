@@ -1,7 +1,10 @@
 package clientrpc
 
-type Status int
+import (
+    "torrent"
+)
 
+type Status int
 const (
     OK        Status = iota + 1 // RPC was a success
     ChunkNotFound               // The requested chunk is not available

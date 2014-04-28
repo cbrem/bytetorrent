@@ -4,5 +4,5 @@ package client
 // local files associated with a torrent Client change.
 type LocalFileListener interface {
     // OnChange notifies a LocalFileListener when a local file changes.
-    OnChange(*LocalFileUpdate)
+    OnChange(*LocalFileChange)
 }

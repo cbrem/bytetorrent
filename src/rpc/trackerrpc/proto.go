@@ -9,7 +9,7 @@ const (
 	Reject                      // Reject a prepare/accept request
 	OutOfDate                   // Message was for committed slot
 	NotReady                    // Trackers are still getting ready
-	FileNotfound                // FileID does not exist
+	FileNotFound                // FileID does not exist
 	OutOfRange                  // Chunk Number out of range for file
 	InvalidID                   // ID is not valid
 	InvalidTrackers             // List of trackers was invalid (for torrent creation)
@@ -41,7 +41,7 @@ type RegisterArgs struct {
 }
 
 type RegisterReply struct {
-	Status   Status
+	Status
 	Trackers []Node
 }
 
@@ -50,7 +50,7 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Status status
+	Status
 	Value  Operation
 }
 
@@ -60,7 +60,7 @@ type PrepareArgs struct {
 }
 
 type PrepareReply struct {
-	Status Status
+	Status
 	PaxNum int
 	Value  Operation
 	SeqNum int
@@ -73,7 +73,7 @@ type AcceptArgs struct {
 }
 
 type AcceptReply struct {
-	Status Status
+	Status
 }
 
 type CommitArgs struct {
@@ -100,7 +100,7 @@ type RequestArgs struct {
 }
 
 type RequestReply struct {
-	Status Status
+	Status
 	Peers  []string // A list of host:port of peers with chunk
 }
 
@@ -109,7 +109,7 @@ type CreateArgs struct {
 }
 
 type UpdateReply struct {
-	Status Status
+	Status
 }
 
 type TrackersArgs struct {

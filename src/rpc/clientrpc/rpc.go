@@ -1,8 +1,8 @@
 package clientrpc
 
 // Clients will handle RPCs on this interface.
-type RemoteClient struct {
-    GetChunk(*GetChunkArgs, *GetChunkReply)
+type RemoteClient interface {
+    GetChunk(*GetArgs, *GetReply) error
 }
 
 type Client struct {

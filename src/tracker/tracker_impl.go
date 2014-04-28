@@ -1,5 +1,18 @@
 package tracker
 
+// TODO:
+//   - suggestions from Connor:
+//   	- can we get rid of numChunks now that we're storing torrents?
+//   	- rename operation Remove to Delete
+//   	- where are we creating the empty maps for t.peer[chunkID]?
+//     when we create an entry for the torrent, or when we try to add
+//     hostPorts?
+//   	- in eventHandler, in a few places, we're checking whether a
+//     torrentID is in torrents, and then assuming that corresponding
+//     chunkIDs will be in peers. Is this safe? I think it is, assuming
+//     a perfect tracker implementation...but might we want to actually
+//     check that chunkIDs are there, while we're debugging?
+
 import (
 	"container/list"
 	"errors"
