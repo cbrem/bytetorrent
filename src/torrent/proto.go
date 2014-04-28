@@ -9,7 +9,8 @@ type TrackerNode struct {
 // It has the form <name, file_hash>.
 type ID struct {
     Name string // A human-readable name for this Torrent
-    Hash []byte // The SHA-1 hash of the file associated with the Torrent
+    Hash string // The string representation of the SHA-1
+                // hash of the file associated with the Torrent
 }
 
 // An identifier for a chunk within a torrent.
