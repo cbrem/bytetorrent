@@ -1,14 +1,17 @@
 // This file contains utility funtions for creating and manipulating Torrents.
 
+// TODO: currently, I don't think we close any files...
+
 package torrent
 
 import (
     "crypto/sha1"
-    "encoding/json"
+    "encoding/gob"
     "errors"
-    "io/ioutil"
-    "os"
+    "fmt"
     "net/rpc"
+    "os"
+    "strings"
 
     "tracker/trackerproto"
     "torrent/torrentproto"
@@ -75,13 +78,25 @@ func New(path string, name string, trackerNodes []torrentproto.TrackerNode) (tor
 // This assumes that the Torrent at the given path was created using ToFile.
 func Load(path string) (torrentproto.Torrent, error) {
     var t torrentproto.Torrent
-    if bytes, err := ioutil.ReadFile(path); err != nil {
+    if file, err := os.Open(path); err != nil {
         return torrentproto.Torrent{}, err
-    } else if err := json.Unmarshal(bytes, &t); err != nil {
+    } else if err := gob.NewDecoder(file).Decode(&t); err != nil {
         return torrentproto.Torrent{}, err
     } else {
         // Successfully created Torrent from file.
-        return t, nil
+        return t, nil   
+    }
+}
+
+// Save serializes a torrent and writes it out to the given file.
+func Save(t torrentproto.Torrent, path string) error {
+    if file, err := os.Create(path); err != nil {
+        return err
+    } else if err := gob.NewEncoder(file).Encode(t); err != nil {
+        return err
+    } else {
+        // Successfully wrote Torrent to file.
+        return nil
     }
 }
 
@@ -109,7 +124,7 @@ func Register(t torrentproto.Torrent) error {
             // We found a live node in the tracker cluster.
             args := & trackerproto.CreateArgs {Torrent: t}
             reply :=  & trackerproto.UpdateReply {}
-            if err := conn.Call("Tracker.CreateEntry", args, reply); err == nil {
+            if err := conn.Call("RemoteTracker.CreateEntry", args, reply); err == nil {
                 // Tracker responded to CreateEntry call. If create was successful,
                 // continue creating Torrent. Otherwise, return an error.
                 switch reply.Status {
@@ -204,18 +219,6 @@ func WriteChunk(t torrentproto.Torrent, file *os.File, chunkNum int, chunk []byt
     }
 }
 
-// Save serializes a torrent and writes it out to the given file.
-func Save(t torrentproto.Torrent, path string) error {
-    if bytes, err := json.Marshal(t); err != nil {
-        return err
-    } else if err := ioutil.WriteFile(path, bytes, MODE); err != nil {
-        return err
-    } else {
-        // Successfully wrote Torrent to file.
-        return nil
-    }
-}
-
 // ChunkBounds returns the start and length of the given chunk.
 // Returns a non-nil error if the chunk number is invalid for this Torrent.
 func ChunkBounds(t torrentproto.Torrent, chunkNum int) (int, int, error) {
@@ -233,4 +236,28 @@ func ChunkBounds(t torrentproto.Torrent, chunkNum int) (int, int, error) {
     } else {
         return start, length, nil
     }
+}
+
+// String converts the given torrent to a human-readable string representation.
+func String(t torrentproto.Torrent) string {
+    fields := make([]string, 0)
+    fields = append(fields, fmt.Sprintf("ID: {Name: %s, Hash: %s}", t.ID.Name, t.ID.Hash))
+    fields = append(fields, fmt.Sprintf("File Size: %d", t.FileSize))
+    fields = append(fields, fmt.Sprintf("Chunk Size: %d", t.ChunkSize))
+
+    chunkHashes := make([]string, 0)
+    chunkHashes = append(chunkHashes, "Chunk Hashes")
+    for chunkNum, hash := range t.ChunkHashes {
+        chunkHashes = append(chunkHashes, fmt.Sprintf("%d: %s", chunkNum, hash))
+    }
+    fields = append(fields, strings.Join(chunkHashes, "\n\t"))
+
+    trackerNodes := make([]string, 0)
+    trackerNodes = append(trackerNodes, "Tracker IPs")
+    for _, trackerNode := range t.TrackerNodes {
+        trackerNodes = append(trackerNodes, trackerNode.HostPort)
+    }
+    fields = append(fields, strings.Join(trackerNodes, "\n\t"))    
+
+    return strings.Join(fields, "\n")
 }
