@@ -103,7 +103,6 @@ type trackerServer struct {
 	registers            chan *Register
 	nodeID               int
 	trackers             []*rpc.Client
-	paxCom               [](chan *PaxosBroadcast)
 
 	// Channels for rpc calls
 	prepares    chan *Prepare
@@ -133,6 +132,12 @@ type trackerServer struct {
 	peers      map[torrent.ChunkID](map[string](struct{})) // Maps chunk info -> list of host:port with that chunk
 	pendingOps *list.List
 	pendingMut *sync.Mutex
+
+	// Used for debugging
+	dbclose    chan struct {}
+	dbstall    chan int
+	dbstallall chan struct {}
+	dbcontinue chan struct {}
 }
 
 func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (TrackerServer, error) {
@@ -161,9 +166,11 @@ func NewTrackerServer(masterServerAddr string, numNodes, port, nodeID int) (Trac
 		peers:                make(map[string](map[string](struct{}))),
 		trackers:             make([]*rpc.Client, numNodes),
 		outOfDate:            make(chan int),
-		paxCom:               make([](chan *PaxosBroadcast), numNodes),
 		pendingOps:           list.New(),
-		pendingMut:           &sync.Mutex{}}
+		pendingMut:           &sync.Mutex{},
+		dbclose:              make(chan struct{}),
+		dbstall:              make(chan int),
+		dbstallall:           make(chan struct{})}
 
 	// Attempt to service connections on the given port.
 	ln, lnErr := net.Listen("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
@@ -420,6 +427,24 @@ func (t *trackerServer) slaveAwaitJoin() error {
 func (t *trackerServer) eventHandler() {
 	for {
 		select {
+		case <-t.dbclose:
+			// Closing (for debugging / testing reasons)
+			return
+		case <-t.dbstallall:
+			// Stalling (for debugging / testing reasons)
+			// Wait until we receive a signal on t.dbcontinue,
+			// then keep going
+			<-t.dbcontinue
+		case s := <-t.dbstall:
+			// Someone requested that we stall for s seconds.
+			t.dbcontinue = make(chan struct {})
+			close(t.dbstallall)
+			wait := time.Duration(s) * time.Second
+			time.AfterFunc(wait,
+				func () {
+					t.dbstallall = make(chan struct{})
+					close(t.dbcontinue)
+				})
 		case prep := <-t.prepares:
 			// Handle prepare messages
 			reply := &trackerrpc.PrepareReply{
@@ -646,53 +671,46 @@ func (t *trackerServer) catchUp(target int) {
 	}
 }
 
-// A function to send Prepare, Accept, and Commit messages
-// to a single node in the Paxos cluster
-func (t *trackerServer) paxosCommunicator(id int) {
-	for {
-		select {
-		case mess := <-t.paxCom[id]:
-			reqPaxNum := mess.MyN
-			if mess.Type == Prepare {
-				args := &trackerrpc.PrepareArgs{
-					PaxNum: reqPaxNum,
-					SeqNum: mess.seqNum}
-				reply := &trackerrpc.PrepareReply{}
-				if err := t.trackers[id].Call("Paxos.Prepare", args, reply); err != nil {
-					// Error: Tell the paxosHandler that we were "rejected"
-					mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
-				} else {
-					// Pass the data back to the PaxosHandler
-					mess.Reply <- &PaxosReply{
-						Status:    reply.Status,
-						ReqPaxNum: reqPaxNum,
-						PaxNum:    reply.PaxNum,
-						Value:     reply.Value,
-						SeqNum:    reply.SeqNum}
-				}
-			} else if mess.Type == Accept {
-				args := &trackerrpc.AcceptArgs{
-					PaxNum: reqPaxNum,
-					SeqNum: mess.seqNum,
-					Value:  mess.Value}
-				reply := &trackerrpc.AcceptReply{}
-				if err := t.trackers[id].Call("Paxos.Accept", args, reply); err != nil {
-					// Error: Tell the paxosHandler that we were "rejected"
-					mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
-				} else {
-					mess.Reply <- &PaxosReply{
-						Status:    reply.Status,
-						ReqPaxNum: reqPaxNum,
-						SeqNum:    mess.seqNum}
-				}
-			} else if mess.Type == Commit {
-				args := &trackerrpc.CommitArgs{
-					SeqNum: mess.seqNum,
-					Value:  mess.Value}
-				reply := &trackerrpc.CommitReply{}
-				t.trackers[id].Call("Paxos.Commit", args, reply)
-			}
+func (t *trackerServer) sendMess(id int, mess *PaxosBroadcast) {
+	reqPaxNum := mess.MyN
+	if mess.Type == Prepare {
+		args := &trackerrpc.PrepareArgs{
+			PaxNum: reqPaxNum,
+			SeqNum: mess.seqNum}
+		reply := &trackerrpc.PrepareReply{}
+		if err := t.trackers[id].Call("Paxos.Prepare", args, reply); err != nil {
+			// Error: Tell the paxosHandler that we were "rejected"
+			mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
+		} else {
+			// Pass the data back to the PaxosHandler
+			mess.Reply <- &PaxosReply{
+				Status:    reply.Status,
+				ReqPaxNum: reqPaxNum,
+				PaxNum:    reply.PaxNum,
+				Value:     reply.Value,
+				SeqNum:    reply.SeqNum}
 		}
+	} else if mess.Type == Accept {
+		args := &trackerrpc.AcceptArgs{
+			PaxNum: reqPaxNum,
+			SeqNum: mess.seqNum,
+			Value:  mess.Value}
+		reply := &trackerrpc.AcceptReply{}
+		if err := t.trackers[id].Call("Paxos.Accept", args, reply); err != nil {
+			// Error: Tell the paxosHandler that we were "rejected"
+			mess.Reply <- &PaxosReply{Status: trackerrpc.Reject}
+		} else {
+			mess.Reply <- &PaxosReply{
+				Status:    reply.Status,
+				ReqPaxNum: reqPaxNum,
+				SeqNum:    mess.seqNum}
+		}
+	} else if mess.Type == Commit {
+		args := &trackerrpc.CommitArgs{
+			SeqNum: mess.seqNum,
+			Value:  mess.Value}
+		reply := &trackerrpc.CommitReply{}
+		t.trackers[id].Call("Paxos.Commit", args, reply)
 	}
 }
 
@@ -708,6 +726,14 @@ func (t *trackerServer) paxosHandler() {
 	oks := 0
 	for {
 		select {
+		case <-t.dbclose:
+			// Closing (for debugging / testing reasons)
+			return
+		case <-t.dbstallall:
+			// Stalling (for debugging / testing reasons)
+			// Wait until we receive a signal on t.dbcontinue,
+			// then keep going
+			<-t.dbcontinue
 		case op := <-t.pending:
 			t.pendingMut.Lock()
 			t.pendingOps.PushBack(op)
@@ -721,12 +747,13 @@ func (t *trackerServer) paxosHandler() {
 			backoff = 1
 			responses = 0
 			oks = 0
-			for ch := range t.paxCom {
-				ch <- &PaxosBroadcast{
+			for id := 0; id < t.numNodes; id++ {
+				mess := &PaxosBroadcast{
 					MyN:    t.myN,
 					Type:   Prepare,
 					Reply:  prepareReply,
 					SeqNum: t.seqNum}
+				go t.sendMess(id, mess)
 			}
 		case prep := <-prepareReply:
 			// First check that this is a response to the current PaxosMessage
@@ -762,13 +789,14 @@ func (t *trackerServer) paxosHandler() {
 						t.myN += t.numNodes
 						responses = 0
 						oks = 0
-						for ch := range t.paxCom {
-							ch <- &PaxosBroadcast{
+						for id := 0; id < t.numNodes; id++ {
+							mess := &PaxosBroadcast{
 								MyN:    t.myN,
 								Type:   Accept,
 								Reply:  acceptReply,
 								SeqNum: t.seqNum,
 								Value:  &accV}
+							go t.sendMess(id, mess)
 						}
 					}
 				} else {
@@ -788,21 +816,25 @@ func (t *trackerServer) paxosHandler() {
 				}
 
 				if oks > (t.numNodes / 2) {
-					for ch := range t.paxCom {
-						ch <- &PaxosBroadcast{
+					seqNum := t.seqNum
+					for id := 0; id < t.numNodes; id++ {
+						mess := &PaxosBroadcast{
 							MyN:    t.myN,
 							Type:   Commit,
-							SeqNum: t.seqNum,
+							SeqNum: seqNum,
 							Value:  &accV}
+						go t.sendMess(id, mess)
 					}
 
+					t.pendingMut.Lock()
 					if pendingOps.Len() > 0 {
 						// TODO
-						// Make it skip prepare phase
+						// Skip the prepare phase
 						initPaxos <- struct{}{}
 					} else {
 						inPaxos = false
 					}
+					t.pendingMut.Unlock()
 				} else {
 					backoff = 2 * backoff
 					wait := time.Second * time.Duration(backoff*REGISTER_PERIOD)
@@ -810,5 +842,16 @@ func (t *trackerServer) paxosHandler() {
 				}
 			}
 		}
+	}
+}
+
+// DebugClose is used only in debugging.
+// Lets you tell the tracker to stop doing things for stall-many seconds
+// If stall <= 0, then it just shuts down.
+func (t *trackerServer) DebugStall(stall int) {
+	if stall <= 0 {
+		close(t.dbclose)
+	} else {
+		t.dbstall <- stall
 	}
 }
