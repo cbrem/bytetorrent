@@ -3,7 +3,7 @@
 //  - update lfl when things happen
 //  - make sure that this works with the whole torrent-validating sheme
 //  - don't just send chunkID in rpc... wrap this..also, make sure
-//    clientrpc is using the right thing
+//    clientproto is using the right thing
 
 package client
 
@@ -16,15 +16,16 @@ import (
     "net/rpc"
     "os"
 
-    "rpc/clientrpc"
-    "rpc/trackerrpc"
+    "client/clientproto"
+    "tracker/trackerproto"
     "torrent"
+    "torrent/torrentproto"
 )
 
 // The client's representation of a request to get a chunk.
 type Get struct {
-    Args *clientrpc.GetArgs
-    Reply chan *clientrpc.GetReply
+    Args *clientproto.GetArgs
+    Reply chan *clientproto.GetReply
 }
 
 // The client's representation of a request to close the client.
@@ -36,7 +37,7 @@ type Close struct {
 // The client's representation of a request to offer a file to a Tracker.
 type Offer struct {
     // A Torrent for the file being offered.
-    Torrent torrent.Torrent
+    Torrent torrentproto.Torrent
 
     // The local path to the file being offered.
     Path string
@@ -48,7 +49,7 @@ type Offer struct {
 // The client's representation of a request to download a file.
 type Download struct {
     // A Torrent for the file to download.
-    Torrent torrent.Torrent
+    Torrent torrentproto.Torrent
 
     // The local path to the location to which the file should download.
     Path string
@@ -60,7 +61,7 @@ type Download struct {
 // A ByteTorrent Client implementation.
 type client struct {
     // A map from Torrent IDs to associated local file states
-    localFiles map[torrent.ID]*LocalFile
+    localFiles map[torrentproto.ID]*clientproto.LocalFile
 
     // Requests to get chunks from this client.
     gets chan *Get
@@ -76,11 +77,11 @@ type client struct {
 
     // Go routines pass the IDs of successfully downloaded chunks to the
     // eventHandler via this channel.
-    downloadedChunks chan torrent.ChunkID
+    downloadedChunks chan torrentproto.ChunkID
 
     // Go routines pass the IDs of missing chunks to the eventHandler via this
     // channel.
-    missingChunks chan torrent.ChunkID
+    missingChunks chan torrentproto.ChunkID
 
     // This client's hostport.
     // TODO: do we need both? or just addr?
@@ -91,7 +92,7 @@ type client struct {
 }
 
 // New creates and starts a new ByteTorrent Client.
-func NewClient(localFiles map[torrent.ID]*LocalFile, lfl LocalFileListener, hostPort string) (Client, error) {
+func NewClient(localFiles map[torrentproto.ID]*clientproto.LocalFile, lfl LocalFileListener, hostPort string) (Client, error) {
     c := & client {
         localFiles: localFiles,
         lfl: lfl,
@@ -105,7 +106,7 @@ func NewClient(localFiles map[torrent.ID]*LocalFile, lfl LocalFileListener, host
     if ln, err := net.Listen("tcp", hostPort); err != nil {
         // Failed to listen on the given host:port.
         return nil, err
-    } else if err := rpc.Register(clientrpc.Wrap(c)); err != nil {
+    } else if err := rpc.Register(Wrap(c)); err != nil {
         // Failed to register this Client for RPCs as a RemoteClient.
         return nil, err
     } else {
@@ -119,8 +120,8 @@ func NewClient(localFiles map[torrent.ID]*LocalFile, lfl LocalFileListener, host
     }
 }
 
-func (c *client) GetChunk(args *clientrpc.GetArgs, reply *clientrpc.GetReply) error {
-    replyChan := make(chan *clientrpc.GetReply)
+func (c *client) GetChunk(args *clientproto.GetArgs, reply *clientproto.GetReply) error {
+    replyChan := make(chan *clientproto.GetReply)
     get := &Get{
         Args: args,
         Reply: replyChan}
@@ -129,7 +130,7 @@ func (c *client) GetChunk(args *clientrpc.GetArgs, reply *clientrpc.GetReply) er
     return nil
 }
 
-func (c *client) OfferFile(t torrent.Torrent, path string) error {
+func (c *client) OfferFile(t torrentproto.Torrent, path string) error {
     replyChan := make(chan error)
     offer := & Offer {
         Torrent: t,
@@ -139,7 +140,7 @@ func (c *client) OfferFile(t torrent.Torrent, path string) error {
     return <- replyChan
 }
 
-func (c *client) DownloadFile(t torrent.Torrent, path string) error {
+func (c *client) DownloadFile(t torrentproto.Torrent, path string) error {
     replyChan := make(chan error)
     download := & Download {
         Torrent: t,
@@ -171,7 +172,7 @@ func (c *client) eventHandler() {
         // TODO: check that we do not already have the file?
         case download := <- c.downloads:
             // Create an entry for this torrent ID.
-            localFile := & LocalFile {
+            localFile := & clientproto.LocalFile {
                 Torrent: download.Torrent,
                 Path: download.Path,
                 Chunks: make(map[int]struct{})}
@@ -179,9 +180,9 @@ func (c *client) eventHandler() {
 
             // Inform this Client's LocalFileListener that local files have
             // been added.
-            c.lfl.OnChange(& LocalFileChange {
+            c.lfl.OnChange(& clientproto.LocalFileChange {
                 LocalFile: localFile,
-                Operation: LocalFileAdd})
+                Operation: clientproto.LocalFileAdd})
 
             // Asynchronously download chunks of the file for this torrent.
             go downloadFile(download, c.downloadedChunks)
@@ -192,31 +193,31 @@ func (c *client) eventHandler() {
             if localFile, ok := c.localFiles[torrentID]; !ok {
                 // This Client does not know about a local file which
                 // corresponds to the requested Torrent ID.
-                get.Reply <- & clientrpc.GetReply {
-                    Status: clientrpc.ChunkNotFound,
+                get.Reply <- & clientproto.GetReply {
+                    Status: clientproto.ChunkNotFound,
                     Chunk: nil}
             } else if _, ok := localFile.Chunks[chunkNum]; !ok {
                 // This Client knows about the requested file,
                 // but does not have the requested chunk.
-                get.Reply <- & clientrpc.GetReply {
-                    Status: clientrpc.ChunkNotFound,
+                get.Reply <- & clientproto.GetReply {
+                    Status: clientproto.ChunkNotFound,
                     Chunk: nil}
             } else if file, err := os.Open(localFile.Path); err != nil {
                 // The Client thought that it had the requested chunk,
                 // but cannot open the file containing the chunk.
-                get.Reply <- & clientrpc.GetReply {
-                    Status: clientrpc.ChunkNotFound,
+                get.Reply <- & clientproto.GetReply {
+                    Status: clientproto.ChunkNotFound,
                     Chunk: nil}
-            } else if chunk, err := ReadChunk(localFile.Torrent, file, chunkNum); err != nil {
+            } else if chunk, err := torrent.ReadChunk(localFile.Torrent, file, chunkNum); err != nil {
                 // The Client could not get the requested chunk from the file.
-                get.Reply <- & clientrpc.GetReply {
-                    Status: clientrpc.ChunkNotFound,
+                get.Reply <- & clientproto.GetReply {
+                    Status: clientproto.ChunkNotFound,
                     Chunk: nil}
             } else {
                 // Got the requested chunk. Send it back to the requesting
                 // client.
-                get.Reply <- & clientrpc.GetReply {
-                    Status: clientrpc.OK,
+                get.Reply <- & clientproto.GetReply {
+                    Status: clientproto.OK,
                     Chunk: chunk}
             }
 
@@ -234,20 +235,20 @@ func (c *client) eventHandler() {
             // Record that this client has these chunks.
             // Note that we do not check a chunk's hash here to see if it
             // is valid. This is a task for the Client receiving the chunk.
-            localFile := & LocalFile {
+            localFile := & clientproto.LocalFile {
                 Torrent: offer.Torrent,
                 Path: offer.Path,
                 Chunks: make(map[int]struct{})}
             c.localFiles[offer.Torrent.ID] = localFile
-            for chunkNum := 0; chunkNum < NumChunks(offer.Torrent); chunkNum++ {
+            for chunkNum := 0; chunkNum < torrent.NumChunks(offer.Torrent); chunkNum++ {
                 localFile.Chunks[chunkNum] = struct{}{}
             }
 
             // Inform this Client's LocalFileListener that local files have
             // been updated.
-            c.lfl.OnChange(& LocalFileChange {
+            c.lfl.OnChange(& clientproto.LocalFileChange {
                 LocalFile: localFile,
-                Operation: LocalFileUpdate})
+                Operation: clientproto.LocalFileUpdate})
 
             // Offer this file to a Tracker.
             if trackerConn, err := getResponsiveTrackerNode(offer.Torrent); err != nil {
@@ -257,19 +258,19 @@ func (c *client) eventHandler() {
             } else {
                 // Confirm to the Tracker that this client has all chunks associated with
                 // the Torrent.
-                for chunkNum := 0; chunkNum < NumChunks(offer.Torrent); chunkNum++ {
-                    args := & trackerrpc.ConfirmArgs{
-                        Chunk: torrent.ChunkID {
+                for chunkNum := 0; chunkNum < torrent.NumChunks(offer.Torrent); chunkNum++ {
+                    args := & trackerproto.ConfirmArgs{
+                        Chunk: torrentproto.ChunkID {
                             ID: offer.Torrent.ID,
                             ChunkNum: chunkNum},
                         HostPort: c.hostPort}
-                    reply := & trackerrpc.UpdateReply{}
+                    reply := & trackerproto.UpdateReply{}
                     if err := trackerConn.Call("Tracker.ConfirmChunk", args, reply); err != nil {
                         // Previously responsive Tracker has failed.
                         offer.Reply <- err
                         return
                     }
-                    if reply.Status == trackerrpc.FileNotFound {
+                    if reply.Status == trackerproto.FileNotFound {
                         // Torrent refers to a file which does not exist on the Tracker.
                         offer.Reply <- errors.New("Tried to offer file which does not exist on Tracker")
                         return
@@ -304,9 +305,9 @@ func (c *client) eventHandler() {
 
                 // Inform this Client's LocalFileListener that local files have
                 // been updated.
-                c.lfl.OnChange(& LocalFileChange {
+                c.lfl.OnChange(& clientproto.LocalFileChange {
                     LocalFile: localFile,
-                    Operation: LocalFileUpdate})
+                    Operation: clientproto.LocalFileUpdate})
             }
         }
     }
@@ -314,7 +315,7 @@ func (c *client) eventHandler() {
 
 // getResponsiveTrackerNode gets a live connection to a Tracker node.
 // However, there is no guarantee that this connection won't die immediately.
-func getResponsiveTrackerNode(t torrent.Torrent) (*rpc.Client, error) {
+func getResponsiveTrackerNode(t torrentproto.Torrent) (*rpc.Client, error) {
     for _, trackerNode := range t.TrackerNodes {
         if conn, err := rpc.DialHTTP("tcp", trackerNode.HostPort); err == nil {
             // Found a live node.
@@ -333,7 +334,7 @@ func getResponsiveTrackerNode(t torrent.Torrent) (*rpc.Client, error) {
 //
 // TODO: do we have a function for offering just a chunk?
 // TODO: should this return an error if the chunks aren't available within some time?
-func downloadFile(download *Download, downloadedChunks chan torrent.ChunkID) {
+func downloadFile(download *Download, downloadedChunks chan torrentproto.ChunkID) {
     // Create a file to hold this chunk.
     if file, err := os.Create(download.Path); err != nil {
         // Failed to create file at given path.
@@ -345,12 +346,12 @@ func downloadFile(download *Download, downloadedChunks chan torrent.ChunkID) {
         return
     } else {
         // Download the chunks for this file in a random order.
-        for chunkNum := range rand.Perm(NumChunks(download.Torrent)) {
-            chunkID := torrent.ChunkID {
+        for chunkNum := range rand.Perm(torrent.NumChunks(download.Torrent)) {
+            chunkID := torrentproto.ChunkID {
                 ID: download.Torrent.ID,
                 ChunkNum: chunkNum}
-            trackerArgs := & trackerrpc.RequestArgs {Chunk: chunkID}
-            trackerReply := & trackerrpc.RequestReply {}
+            trackerArgs := & trackerproto.RequestArgs {Chunk: chunkID}
+            trackerReply := & trackerproto.RequestReply {}
             if err := trackerConn.Call("Tracker.RequestChunk", trackerArgs, trackerReply); err != nil {
                 // Failed to make RPC.
                 download.Reply <- err
@@ -377,11 +378,11 @@ func downloadFile(download *Download, downloadedChunks chan torrent.ChunkID) {
 // TODO: maybe add timeouts so we don't get hung up on any peer?
 func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string) error {
     // Try peers until one responds with chunk.
-    peerArgs := & clientrpc.GetArgs{
-        ChunkID: torrent.ChunkID {
+    peerArgs := & clientproto.GetArgs{
+        ChunkID: torrentproto.ChunkID {
             ID: download.Torrent.ID,
             ChunkNum: chunkNum}}
-    peerReply := & clientrpc.GetReply{}
+    peerReply := & clientproto.GetReply{}
     h := sha1.New()
     for _, hostPort := range peers {
         if peer, err := rpc.DialHTTP("tcp", hostPort); err != nil {
@@ -398,7 +399,7 @@ func downloadChunk(download *Download, file *os.File, chunkNum int, peers []stri
         if string(h.Sum(nil)) != download.Torrent.ChunkHashes[chunkNum] {
             // Chunk had bad hash.
             continue
-        } else if err := WriteChunk(download.Torrent, file, chunkNum, chunk); err != nil {
+        } else if err := torrent.WriteChunk(download.Torrent, file, chunkNum, chunk); err != nil {
             // Failed to write chunk locally.
             continue
         } else {

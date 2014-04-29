@@ -1,8 +1,8 @@
 package client
 
 import (
-    "rpc/clientrpc"
-    "torrent"
+    "client/clientproto"
+    "torrent/torrentproto"
 )
 
 // The ByteTorrent Client API.
@@ -17,7 +17,7 @@ type Client interface {
     // - OK: If the reply contains the requested chunk.
     // - ChunkNotFound: If the Client does not contain the requested chunk for
     //   the requested file.
-    GetChunk(*clientrpc.GetArgs, *clientrpc.GetReply) error
+    GetChunk(*clientproto.GetArgs, *clientproto.GetReply) error
 
     // OfferFile associates a local file with a Torrent within the Client.
     // It also informs the trackerNodes listed in the Torrent that this Client
@@ -28,7 +28,7 @@ type Client interface {
     // Throws an error if the Client cannot inform trackerNodes that it
     // possesses this file (e.g. it cannot reach trackerNodes, or trackerNodes
     // do not know about this torrent).
-    OfferFile(torrent.Torrent, string) error
+    OfferFile(torrentproto.Torrent, string) error
 
     // DownloadFile downloads the file with the given Torrent, and stores it at
     // the given path.
@@ -36,7 +36,7 @@ type Client interface {
     // Throws an error if:
     // - the given torrent is not valid
     // - the given path is not valid
-    DownloadFile(torrent.Torrent, string) error
+    DownloadFile(torrentproto.Torrent, string) error
 
     // Close shuts down this Client in an orderly manner.
     // It writes the Client's state out to a file.

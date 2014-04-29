@@ -1,6 +1,6 @@
-package trackerrpc
+package trackerproto
 
-import "torrent"
+import "torrent/torrentproto"
 
 type Status int
 
@@ -26,9 +26,9 @@ const (
 
 type Operation struct {
 	OpType     OperationType   // Type of operation
-	Chunk      torrent.ChunkID // Torrent ID and chunk number
+	Chunk      torrentproto.ChunkID // Torrent ID and chunk number
 	ClientAddr string          // The host:port of the client in question
-	Torrent    torrent.Torrent // The torrent information (if you're trying to create a torrent)
+	Torrent    torrentproto.Torrent // The torrent information (if you're trying to create a torrent)
 }
 
 type Node struct {
@@ -86,17 +86,17 @@ type CommitReply struct {
 }
 
 type ReportArgs struct {
-	Chunk    torrent.ChunkID // Torrent ID and chunk number
+	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
 	HostPort string          // host:port of the client
 }
 
 type ConfirmArgs struct {
-	Chunk    torrent.ChunkID // Torrent ID and chunk number
+	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
 	HostPort string          // host:port of the client
 }
 
 type RequestArgs struct {
-	Chunk torrent.ChunkID // Torrent ID and chunk number
+	Chunk torrentproto.ChunkID // Torrent ID and chunk number
 }
 
 type RequestReply struct {
@@ -105,7 +105,7 @@ type RequestReply struct {
 }
 
 type CreateArgs struct {
-	Torrent torrent.Torrent
+	Torrent torrentproto.Torrent
 }
 
 type UpdateReply struct {

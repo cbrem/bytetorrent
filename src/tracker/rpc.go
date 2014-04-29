@@ -1,4 +1,4 @@
-package trackerrpc
+package tracker
 
 // These are the functions that Trackers will call on each other
 type Paxos interface {
@@ -18,18 +18,18 @@ type Tracker interface {
 	GetTrackers(*TrackersArgs, *TrackersReply) error
 }
 
-type PaxosServer struct {
+type WrappedPaxosServer struct {
 	Paxos
 }
 
 func WrapPaxos(p Paxos) Paxos {
-	return &PaxosServer{p}
+	return &WrappedPaxosServer{p}
 }
 
-type TrackerServer struct {
+type WrappedTrackerServer struct {
 	Tracker
 }
 
 func WrapTracker(t Tracker) Tracker {
-	return &TrackerServer{t}
+	return &WrappedTrackerServer{t}
 }

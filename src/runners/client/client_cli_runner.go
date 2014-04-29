@@ -8,7 +8,9 @@ import (
     "strings"
 
     "torrent"
+    "torrent/torrentproto"
     "client"
+    "client/clientproto"
 )
 
 const (
@@ -33,28 +35,28 @@ var (
 // A listener which updates the view when the Client changes local files.
 type clientFileListener struct {}
 
-func (cfl *clientFileListener) OnChange(change *client.LocalFileChange) {
+func (cfl *clientFileListener) OnChange(change *clientproto.LocalFileChange) {
     switch change.Operation {
-    case client.LocalFileAdd:
+    case clientproto.LocalFileAdd:
         fmt.Println("Added file:", changeToString(change))
-    case client.LocalFileDelete:
+    case clientproto.LocalFileDelete:
         fmt.Println("Deleted file:", changeToString(change))
-    case client.LocalFileUpdate:
+    case clientproto.LocalFileUpdate:
         fmt.Println("Updated file:", changeToString(change))
     }
 }
 
 // changeToString represents a LocalFileChange as a string.
-func changeToString(change *client.LocalFileChange) string {
+func changeToString(change *clientproto.LocalFileChange) string {
     return fmt.Sprintf("%s @ %s: (%d / %d) chunks",
         change.LocalFile.Torrent.ID,
         change.LocalFile.Path,
         len(change.LocalFile.Chunks),
-        client.NumChunks(change.LocalFile.Torrent))
+        torrent.NumChunks(change.LocalFile.Torrent))
 }
 
 // processInputs gets inputs from users and acts on them.
-func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile, trackerNodes []torrent.TrackerNode) {
+func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.LocalFile, trackerNodes []torrentproto.TrackerNode) {
     fmt.Println(COMMANDS)
 
     var cmd, filePath, torrentPath, name string
@@ -65,9 +67,9 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             // Create a new torrent file.
             if filePath == "" || torrentPath == "" || name == "" {
                 fmt.Println(COMMANDS)
-            } else if t, err := client.NewTorrent(filePath, name, trackerNodes); err != nil {
+            } else if t, err := torrent.New(filePath, name, trackerNodes); err != nil {
                 fmt.Println("Could not create torrent", err)
-            } else if err := client.ToFile(t, torrentPath); err != nil {
+            } else if err := torrent.Save(t, torrentPath); err != nil {
                 fmt.Println("Could not write torrent", err)
             }
 
@@ -75,7 +77,7 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             // Offer a file described by a torrent.
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
-            } else if t, err := client.LoadTorrent(torrentPath); err != nil {
+            } else if t, err := torrent.Load(torrentPath); err != nil {
                 fmt.Println("Could not read torrent file", err)
             } else if err := c.OfferFile(t, filePath); err != nil {
                 fmt.Println("Could not offer data file", err)
@@ -85,7 +87,7 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
             // Download the file described by a torrent.
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
-            } else if t, err := client.LoadTorrent(torrentPath); err != nil {
+            } else if t, err := torrent.Load(torrentPath); err != nil {
                 fmt.Println("Could not read torrent file", err)
             } else if err := c.DownloadFile(t, filePath); err != nil {
                 fmt.Println("Could not download data file", err)
@@ -114,12 +116,12 @@ func processInputs(c client.Client, localFiles map[torrent.ID]*client.LocalFile,
 // will see all changed up until we serialize it in processInputs
 func main() {
     // Load saved localFiles, if they exist.
-    var localFiles map[torrent.ID]*client.LocalFile
+    var localFiles map[torrentproto.ID]*clientproto.LocalFile
     if savedBytes, err := ioutil.ReadFile(SAVE_PATH); err != nil {
         fmt.Println("Could not find saved state", err)
     } else if err := json.Unmarshal(savedBytes, localFiles); err != nil {
         fmt.Println("Could not read saved state", err)
-        localFiles = make(map[torrent.ID]*client.LocalFile)
+        localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
     }
 
     // Get hostports from command line.
@@ -131,9 +133,9 @@ func main() {
         return
     }
     clientHostPort := os.Args[1]
-    trackerNodes := make([]torrent.TrackerNode, 0)
+    trackerNodes := make([]torrentproto.TrackerNode, 0)
     for _, trackerHostPort := range os.Args[2:] {
-        trackerNodes = append(trackerNodes, torrent.TrackerNode{HostPort: trackerHostPort})
+        trackerNodes = append(trackerNodes, torrentproto.TrackerNode{HostPort: trackerHostPort})
     }
 
     // Create an start a Client.

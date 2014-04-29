@@ -1,4 +1,6 @@
-package torrent
+// This file contains proto definitions for Torrents.
+
+package torrentproto
 
 // Information about one node in a tracker.
 type TrackerNode struct {
