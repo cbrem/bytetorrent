@@ -71,4 +71,9 @@ type Tracker interface {
 	// GetTrackers returns a list of all trackers in the cluster
 	// Returns status OK, unless something went horribly wrong
 	GetTrackers(*trackerproto.TrackersArgs, *trackerproto.TrackersReply) error
+
+	// Lets you stall a tracker
+	// If 0 is passed, the tracker is shut down
+	// Should only be used for testing
+	DebugStall(int)
 }
