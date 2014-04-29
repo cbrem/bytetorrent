@@ -1,35 +1,39 @@
 package tracker
 
+import (
+	"tracker/trackerproto"
+)
+
 // These are the functions that Trackers will call on each other
-type Paxos interface {
-	RegisterServer(*RegisterArgs, *RegisterReply) error
-	GetOp(*GetArgs, *GetReply) error
-	Prepare(*PrepareArgs, *PrepareReply) error
-	Accept(*AcceptArgs, *AcceptReply) error
-	Commit(*CommitArgs, *CommitReply) error
+type PaxosTracker interface {
+	RegisterServer(*trackerproto.RegisterArgs, *trackerproto.RegisterReply) error
+	GetOp(*trackerproto.GetArgs, *trackerproto.GetReply) error
+	Prepare(*trackerproto.PrepareArgs, *trackerproto.PrepareReply) error
+	Accept(*trackerproto.AcceptArgs, *trackerproto.AcceptReply) error
+	Commit(*trackerproto.CommitArgs, *trackerproto.CommitReply) error
 }
 
 // These are the functions that Clients will call on Trackers
-type Tracker interface {
-	ReportMissing(*ReportArgs, *UpdateReply) error
-	ConfirmChunk(*ConfirmArgs, *UpdateReply) error
-	RequestChunk(*RequestArgs, *RequestReply) error
-	CreateEntry(*CreateArgs, *UpdateReply) error
-	GetTrackers(*TrackersArgs, *TrackersReply) error
+type RemoteTracker interface {
+	ReportMissing(*trackerproto.ReportArgs, *trackerproto.UpdateReply) error
+	ConfirmChunk(*trackerproto.ConfirmArgs, *trackerproto.UpdateReply) error
+	RequestChunk(*trackerproto.RequestArgs, *trackerproto.RequestReply) error
+	CreateEntry(*trackerproto.CreateArgs, *trackerproto.UpdateReply) error
+	GetTrackers(*trackerproto.TrackersArgs, *trackerproto.TrackersReply) error
 }
 
-type WrappedPaxosServer struct {
-	Paxos
+type WrappedPaxosTracker struct {
+	PaxosTracker
 }
 
-func WrapPaxos(p Paxos) Paxos {
-	return &WrappedPaxosServer{p}
+type WrappedRemoteTracker struct {
+	RemoteTracker
 }
 
-type WrappedTrackerServer struct {
-	Tracker
+func WrapPaxos(pt PaxosTracker) PaxosTracker {
+	return &WrappedPaxosTracker{pt}
 }
 
-func WrapTracker(t Tracker) Tracker {
-	return &WrappedTrackerServer{t}
+func WrapRemote(t RemoteTracker) RemoteTracker {
+	return &WrappedRemoteTracker{t}
 }
