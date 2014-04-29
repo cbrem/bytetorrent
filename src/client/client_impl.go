@@ -16,6 +16,8 @@ import (
     "net/http"
     "net/rpc"
     "os"
+    "strings"
+    "time"
 
     "client/clientproto"
     "tracker/trackerproto"
@@ -348,8 +350,12 @@ func (c *client) downloadFile(download *Download) {
         download.Reply <- err
         return
     } else {
+        // Create a new random number generator to help provide load-balancing
+        // for this download.
+        r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
         // Download the chunks for this file in a random order.
-        for chunkNum := range rand.Perm(torrent.NumChunks(download.Torrent)) {
+        for _, chunkNum := range r.Perm(torrent.NumChunks(download.Torrent)) {
             chunkID := torrentproto.ChunkID {
                 ID: download.Torrent.ID,
                 ChunkNum: chunkNum}
@@ -359,7 +365,7 @@ func (c *client) downloadFile(download *Download) {
                 // Failed to make RPC.
                 download.Reply <- err
                 return
-            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers); err != nil {
+            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
                 // Failed to download this chunk.
                 download.Reply <- err
                 return
@@ -379,8 +385,7 @@ func (c *client) downloadFile(download *Download) {
 // If it fails, it returns a non-nil error.
 //
 // TODO: maybe add timeouts so we don't get hung up on any peer?
-func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string) error {
-
+func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string, r *rand.Rand) error {
     // Try peers until one responds with chunk.
     // Randomize order to help balance load across peers.
     peerArgs := & clientproto.GetArgs{
@@ -389,7 +394,7 @@ func downloadChunk(download *Download, file *os.File, chunkNum int, peers []stri
             ChunkNum: chunkNum}}
     peerReply := & clientproto.GetReply{}
     h := sha1.New()
-    for peerNum := range rand.Perm(len(peers)) {
+    for _, peerNum := range r.Perm(len(peers)) {
         hostPort := peers[peerNum]
         if peer, err := rpc.DialHTTP("tcp", hostPort); err != nil {
             // Failed to connect.
