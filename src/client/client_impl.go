@@ -16,7 +16,6 @@ import (
     "net/http"
     "net/rpc"
     "os"
-    "strings"
     "time"
 
     "client/clientproto"
@@ -256,6 +255,8 @@ func (c *client) eventHandler() {
                 Operation: clientproto.LocalFileUpdate})
 
             // Offer this file to a Tracker.
+            //
+            // TODO: do this in a go routine?
             if trackerConn, err := getResponsiveTrackerNode(offer.Torrent); err != nil {
                 // Unable to get a responsive Tracker node.
                 offer.Reply <- nil
