@@ -1,6 +1,6 @@
-package trackerrpc
+package trackerproto
 
-import "torrent"
+import "torrent/torrentproto"
 
 type Status int
 
@@ -9,7 +9,7 @@ const (
 	Reject                      // Reject a prepare/accept request
 	OutOfDate                   // Message was for committed slot
 	NotReady                    // Trackers are still getting ready
-	FileNotfound                // FileID does not exist
+	FileNotFound                // FileID does not exist
 	OutOfRange                  // Chunk Number out of range for file
 	InvalidID                   // ID is not valid
 	InvalidTrackers             // List of trackers was invalid (for torrent creation)
@@ -25,10 +25,10 @@ const (
 )
 
 type Operation struct {
-	OpType     OperationType   // Type of operation
-	Chunk      torrent.ChunkID // Torrent ID and chunk number
-	ClientAddr string          // The host:port of the client in question
-	Torrent    torrent.Torrent // The torrent information (if you're trying to create a torrent)
+	OpType     OperationType        // Type of operation
+	Chunk      torrentproto.ChunkID // Torrent ID and chunk number
+	ClientAddr string               // The host:port of the client in question
+	Torrent    torrentproto.Torrent // The torrent information (if you're trying to create a torrent)
 }
 
 type Node struct {
@@ -41,7 +41,7 @@ type RegisterArgs struct {
 }
 
 type RegisterReply struct {
-	Status   Status
+	Status
 	Trackers []Node
 }
 
@@ -50,7 +50,7 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Status status
+	Status
 	Value  Operation
 }
 
@@ -60,7 +60,7 @@ type PrepareArgs struct {
 }
 
 type PrepareReply struct {
-	Status Status
+	Status
 	PaxNum int
 	Value  Operation
 	SeqNum int
@@ -73,7 +73,7 @@ type AcceptArgs struct {
 }
 
 type AcceptReply struct {
-	Status Status
+	Status
 }
 
 type CommitArgs struct {
@@ -86,30 +86,30 @@ type CommitReply struct {
 }
 
 type ReportArgs struct {
-	Chunk    torrent.ChunkID // Torrent ID and chunk number
-	HostPort string          // host:port of the client
+	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
+	HostPort string               // host:port of the client
 }
 
 type ConfirmArgs struct {
-	Chunk    torrent.ChunkID // Torrent ID and chunk number
-	HostPort string          // host:port of the client
+	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
+	HostPort string               // host:port of the client
 }
 
 type RequestArgs struct {
-	Chunk torrent.ChunkID // Torrent ID and chunk number
+	Chunk torrentproto.ChunkID // Torrent ID and chunk number
 }
 
 type RequestReply struct {
-	Status Status
+	Status
 	Peers  []string // A list of host:port of peers with chunk
 }
 
 type CreateArgs struct {
-	Torrent torrent.Torrent
+	Torrent torrentproto.Torrent
 }
 
 type UpdateReply struct {
-	Status Status
+	Status
 }
 
 type TrackersArgs struct {
