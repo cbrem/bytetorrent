@@ -25,9 +25,11 @@ var (
         ""}, "\n")
     COMMANDS string = strings.Join([]string{
         "Command:",
-        "\tCREATE <file_path> <torrent_path> <name>",
+        "\tCREATE <file_path> <name>",
+        "\tREGISTER <torrent_path>",
         "\tOFFER <file_path> <torrent_path>",
         "\tDOWNLOAD <file_path> <torrent_path>",
+        "\tREAD <torrent_path>",
         "\tEXIT",
         ""}, "\n")
 )
@@ -57,56 +59,100 @@ func changeToString(change *clientproto.LocalFileChange) string {
 
 // processInputs gets inputs from users and acts on them.
 func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.LocalFile, trackerNodes []torrentproto.TrackerNode) {
-    fmt.Println(COMMANDS)
-
-    var cmd, filePath, torrentPath, name string
+    var cmd string
+    var args [3]string
     for {
-        fmt.Scanln(&cmd, &filePath, &torrentPath, &name)
+        // Get a line of input.
+        // If we're read all input (e.g. if we're reading from a temporary file
+        // which another process is writing to), continue until it resumes.
+        // Note that reading EOF is normal, so we don't look for this.
+        if n, _ := fmt.Scanln(&cmd, &args[0], &args[1], &args[2]); n == 0 {
+            continue
+        }
+
+        // Take appropriate action for 
         switch cmd {
         case "CREATE":
             // Create a new torrent file.
-            if filePath == "" || torrentPath == "" || name == "" {
+            filePath, name := args[0], args[1]
+            torrentPath := fmt.Sprintf("%s.torrent", name)
+            if filePath == "" || name == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := torrent.New(filePath, name, trackerNodes); err != nil {
-                fmt.Println("Could not create torrent", err)
+                fmt.Println("Could not create torrent:", err)
             } else if err := torrent.Save(t, torrentPath); err != nil {
-                fmt.Println("Could not write torrent", err)
+                fmt.Println("Could not write torrent:", err)
+            } else {
+                fmt.Println("Successfully created torrent")
+            }
+
+        case "REGISTER":
+            // Register a new torrent with the tracker.
+            torrentPath := args[0]
+            if torrentPath == "" {
+                fmt.Println(COMMANDS)
+            } else if t, err := torrent.Load(torrentPath); err != nil {
+                fmt.Println("Could not read torrent file:", err)
+            } else if err := torrent.Register(t); err != nil {
+                fmt.Println("Could not register torrent:", err)
+            } else {
+                fmt.Println("Successfully registered torrent")
             }
 
         case "OFFER":
             // Offer a file described by a torrent.
+            filePath, torrentPath := args[0], args[1]
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := torrent.Load(torrentPath); err != nil {
-                fmt.Println("Could not read torrent file", err)
+                fmt.Println("Could not read torrent file:", err)
             } else if err := c.OfferFile(t, filePath); err != nil {
-                fmt.Println("Could not offer data file", err)
+                fmt.Println("Could not offer data file:", err)
+            } else {
+                fmt.Println("Successfully offered data file")
             }
 
         case "DOWNLOAD":
             // Download the file described by a torrent.
+            filePath, torrentPath := args[0], args[1]
             if filePath == "" || torrentPath == "" {
                 fmt.Println(COMMANDS)
             } else if t, err := torrent.Load(torrentPath); err != nil {
-                fmt.Println("Could not read torrent file", err)
+                fmt.Println("Could not read torrent file:", err)
             } else if err := c.DownloadFile(t, filePath); err != nil {
-                fmt.Println("Could not download data file", err)
+                fmt.Println("Could not download data file:", err)
+            } else {
+                fmt.Println("Successfully downloaded data file")
+            }
+
+        case "READ":
+            // Show a human-readable representation of a torrent.
+            torrentPath := args[0]
+            if torrentPath == "" {
+                fmt.Println(COMMANDS)
+            } else if t, err := torrent.Load(torrentPath); err != nil {
+                fmt.Println("Could not read torrent file:", err)
+            } else {
+                fmt.Println(torrent.String(t))
             }
 
         case "EXIT":
             // Save the client's state to a file.
             if localFilesBytes, err := json.Marshal(localFiles); err != nil {
-                fmt.Println("Could not save client state", err)
+                fmt.Println("Could not save client state:", err)
             } else if err := ioutil.WriteFile(SAVE_PATH, localFilesBytes, MODE); err != nil {
-                fmt.Println("Could not save client state", err)
+                fmt.Println("Could not save client state:", err)
+            } else {
+                fmt.Println("Successfully saved client state")
             }
 
             // Quit.
+            fmt.Println("Exiting")
             return
 
         default:
             // Invalid command. Print command information.
-            fmt.Println(COMMANDS)
+            //fmt.Println(COMMANDS)
         }
     }
 }
@@ -118,9 +164,10 @@ func main() {
     // Load saved localFiles, if they exist.
     var localFiles map[torrentproto.ID]*clientproto.LocalFile
     if savedBytes, err := ioutil.ReadFile(SAVE_PATH); err != nil {
-        fmt.Println("Could not find saved state", err)
+        fmt.Println("Could not find saved state:", err)
+        localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
     } else if err := json.Unmarshal(savedBytes, localFiles); err != nil {
-        fmt.Println("Could not read saved state", err)
+        fmt.Println("Could not read saved state:", err)
         localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
     }
 
@@ -141,7 +188,7 @@ func main() {
     // Create an start a Client.
     lfl := & clientFileListener {}
     if c, err := client.NewClient(localFiles, lfl, clientHostPort); err != nil {
-        fmt.Println("Could not start client", err)
+        fmt.Println("Could not start client:", err)
     } else {
         // Accept commands from stdin until the user exits.
         fmt.Println("Started client with (clientHostPort, trackerHostPorts) = (", clientHostPort, ", [", strings.Join(os.Args[2:], " "), "] )")
