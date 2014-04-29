@@ -67,7 +67,7 @@ sleep 2
 
 # Create and register a torrent once.
 # Do this using client 1.
-TORRENT_NAME=foo
+TORRENT_NAME=music
 CREATOR=1
 echo -e "CREATE ${FILE_PATH} ${TORRENT_NAME}" >> "${PIPE_BASE}${CREATOR}"
 sleep 2

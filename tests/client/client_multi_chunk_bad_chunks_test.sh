@@ -47,6 +47,18 @@ else
    exit $?
 fi
 
+
+# Identify the imposter file which malicious seeders will offer.
+# It should already exist on disk. If not, exit.
+IMPOSTER_FILE_PATH=virus.mp3
+if [ -f ${IMPOSTER_FILE_PATH} ];
+then
+  echo "Imposter file exists."
+else
+   echo "Imposter file ${IMPOSTER_FILE_PATH} does not exist."
+   exit $?
+fi
+
 # Start tracker.
 TRACKER_PORT=$(((RANDOM % 10000) + 10000))
 ${TRACKER} "localhost:${TRACKER_PORT}" &
@@ -67,7 +79,14 @@ mkfifo $PIPE2
 ${CLIENT} "localhost:${CLIENT2_PORT}" "localhost:${TRACKER_PORT}" < $PIPE2 &
 sleep 2
 
-# Create, register, and upload a torrent on client1.
+# Start client3.
+CLIENT3_PORT=$(((RANDOM % 10000) + 10000))
+PIPE3=/tmp/tmp3
+mkfifo $PIPE3
+${CLIENT} "localhost:${CLIENT3_PORT}" "localhost:${TRACKER_PORT}" < $PIPE3 &
+sleep 2
+
+# Create, register, and offer a torrent on client1.
 TORRENT_NAME=music
 echo -e "CREATE ${FILE_PATH} ${TORRENT_NAME}" >> $PIPE1
 sleep 2
@@ -76,14 +95,19 @@ sleep 2
 echo -e "OFFER ${FILE_PATH} ${TORRENT_NAME}.torrent" >> $PIPE1
 sleep 2
 
-# Download the file from client2.
-DOWNLOADED_FILE_PATH=downloaded_music.mp3
-echo -e "DOWNLOAD ${DOWNLOADED_FILE_PATH} ${TORRENT_NAME}.torrent" >> $PIPE2
-sleep 75
+# Create, register, and offer the imposter file on client2.
+echo -e "OFFER ${IMPOSTER_FILE_PATH} ${TORRENT_NAME}.torrent" >> $PIPE2
+sleep 2
 
-# Exit client.
+# Download the file from client3.
+DOWNLOADED_FILE_PATH=downloaded_music.mp3
+echo -e "DOWNLOAD ${DOWNLOADED_FILE_PATH} ${TORRENT_NAME}.torrent" >> $PIPE3
+sleep 90
+
+# Exit clients.
 echo -e "EXIT" >> $PIPE1
 echo -e "EXIT" >> $PIPE2
+echo -e "EXIT" >> $PIPE3
 sleep 2
 
 # Kill tracker.
@@ -101,4 +125,5 @@ fi
 # Clean up temporary files.
 rm ${PIPE1}
 rm ${PIPE2}
+rm ${PIPE3}
 rm "${TORRENT_NAME}.torrent"
