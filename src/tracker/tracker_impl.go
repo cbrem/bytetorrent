@@ -572,8 +572,32 @@ func (t *trackerServer) eventHandler() {
 					Reply: conf.Reply}
 			}
 		case cre := <-t.creates:
-			// TODO
-			// Check that the torrent has all (and exactly) the trackers in the paxos cluster
+			// First check that all of the suggested nodes are in the cluster
+			correctTrackers := true
+			for _, tortrack := range cre.Args.Torrent.TrackerNodes {
+				inCluster := false
+				for _, tracker := range t.nodes {
+					if tracker == tortrack {
+						inCluster = true
+					}
+				}
+				correctTrackers = correctTrackers && inCluster
+			}
+
+			// Now make sure that all of the cluster's nodes appear in the list
+			for _, tracker := range t.nodes {
+				inCluster := false
+				for _, tortrack := range cre.Args.Torrent.TrackerNodes {
+					if tracker == tortrack {
+						inCluster = true
+					}
+				}
+				correctTrackers = correctTrackers && inCluster
+			}
+
+			if !correctTrackers {
+				cre.Reply <- &trackerproto.UpdateReply{Status: trackerproto.InvalidTrackers}
+			}
 
 			// A client has requested to create a new file
 			tor, ok := t.torrents[cre.Args.Torrent.ID]
