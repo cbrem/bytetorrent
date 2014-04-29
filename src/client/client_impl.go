@@ -382,13 +382,15 @@ func (c *client) downloadFile(download *Download) {
 func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string) error {
 
     // Try peers until one responds with chunk.
+    // Randomize order to help balance load across peers.
     peerArgs := & clientproto.GetArgs{
         ChunkID: torrentproto.ChunkID {
             ID: download.Torrent.ID,
             ChunkNum: chunkNum}}
     peerReply := & clientproto.GetReply{}
     h := sha1.New()
-    for _, hostPort := range peers {
+    for peerNum := range rand.Perm(len(peers)) {
+        hostPort := peers[peerNum]
         if peer, err := rpc.DialHTTP("tcp", hostPort); err != nil {
             // Failed to connect.
             continue
