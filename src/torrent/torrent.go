@@ -18,7 +18,7 @@ import (
 )
 
 const (
-    DEFAULT_CHUNK_SIZE int = 1000 // Number of bytes per chunk
+    DEFAULT_CHUNK_SIZE int = 16000 // Number of bytes per chunk
     MODE os.FileMode = 644 // Mode for writing torrent files
 )
 
