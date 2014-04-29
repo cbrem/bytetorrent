@@ -144,6 +144,7 @@ func main() {
         fmt.Println("Could not start client", err)
     } else {
         // Accept commands from stdin until the user exits.
+        fmt.Println("Started client with (clientHostPort, trackerHostPorts) = (", clientHostPort, ", [", strings.Join(os.Args[2:], " "), "] )")
         processInputs(c, localFiles, trackerNodes)
     }
 }

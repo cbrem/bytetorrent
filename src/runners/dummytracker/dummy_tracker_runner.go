@@ -1,7 +1,9 @@
 package main
 
 import (
+    "fmt"
     "os"
+    "strings"
 
     "dummytracker"
 )
@@ -22,7 +24,12 @@ func main() {
     hostPort := os.Args[1]
 
     // Start tracker on given hostport.
-    dummytracker.NewTrackerServer(hostPort)
+    if _, err := dummytracker.New(hostPort); err != nil {
+        fmt.Println("Failed to start dummy tracker", err)
+    } else {
+        fmt.Println("Started dummy tracker with hostPort =", hostPort)
+    }
+
 
     // Block forever.
     select {}

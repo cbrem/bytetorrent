@@ -5,32 +5,42 @@
 
 package dummytracker
 
+import (
+    "net"
+    "net/http"
+    "net/rpc"
+
+    "torrent"
+    "torrent/torrentproto"
+    "tracker/trackerproto"
+)
+
 type Request struct {
-    Args  *trackerrpc.RequestArgs
-    Reply chan *trackerrpc.RequestReply
+    Args  *trackerproto.RequestArgs
+    Reply chan *trackerproto.RequestReply
 }
 
 type Confirm struct {
-    Args  *trackerrpc.ConfirmArgs
-    Reply chan *trackerrpc.UpdateReply
+    Args  *trackerproto.ConfirmArgs
+    Reply chan *trackerproto.UpdateReply
 }
 
 type Report struct {
-    Args  *trackerrpc.ReportArgs
-    Reply chan *trackerrpc.UpdateReply
+    Args  *trackerproto.ReportArgs
+    Reply chan *trackerproto.UpdateReply
 }
 
 type Create struct {
-    Args  *trackerrpc.CreateArgs
-    Reply chan *trackerrpc.UpdateReply
+    Args  *trackerproto.CreateArgs
+    Reply chan *trackerproto.UpdateReply
 }
 
 type GetTrackers struct {
-    Args  *trackerrpc.TrackersArgs
-    Reply chan *trackerrpc.TrackersReply
+    Args  *trackerproto.TrackersArgs
+    Reply chan *trackerproto.TrackersReply
 }
 
-type testTracker struct {
+type dummyTracker struct {
     // Set-up
     hostPort    string
 
@@ -42,27 +52,27 @@ type testTracker struct {
     getTrackers chan *GetTrackers
 
     // Actual data storage
-    torrents   map[torrent.ID]torrent.Torrent              // Map the torrentID to the Torrent information
-    peers      map[torrent.ChunkID](map[string](struct{})) // Maps chunk info -> list of host:port with that chunk
+    torrents   map[torrentproto.ID]torrentproto.Torrent              // Map the torrentID to the Torrent information
+    peers      map[torrentproto.ChunkID](map[string](struct{})) // Maps chunk info -> list of host:port with that chunk
 }
 
-func NewTrackerServer(hostPort string) (trackerrpc.Tracker, error) {
-    t := &trackerServer{
+func New(hostPort string) (DummyTracker, error) {
+    dt := & dummyTracker{
         hostPort:             hostPort,
-        registers:            make(chan *Register),
-        reports:              make(chan *Report),
         requests:             make(chan *Request),
+        confirms:             make(chan *Confirm),
+        reports:              make(chan *Report),
         creates:              make(chan *Create),
         getTrackers:          make(chan *GetTrackers),
-        peers:                make(map[string](map[string](struct{}))),
-        trackers:             make([]*rpc.Client, numNodes)}
+        torrents:             make(map[torrentproto.ID]torrentproto.Torrent),
+        peers:                make(map[torrentproto.ChunkID](map[string](struct{})))}
 
     // Attempt to service connections on the given port.
     // Then, configure this TrackerServer to receive RPCs over HTTP on a
-    // trackerrpc.Tracker interface.
+    // tracker.Tracker interface.
     if ln, lnErr := net.Listen("tcp", hostPort); lnErr != nil {
         return nil, lnErr
-    } else if regErr := rpc.Register(t); regErr != nil {
+    } else if regErr := rpc.Register(Wrap(dt)); regErr != nil {
         return nil, regErr
     } else {
         rpc.HandleHTTP()
@@ -70,124 +80,124 @@ func NewTrackerServer(hostPort string) (trackerrpc.Tracker, error) {
 
         // Start this TrackerServer's eventHandler, which will respond to RPCs,
         // and return it.
-        go t.eventHandler()
-        return t, nil
+        go dt.eventHandler()
+        return dt, nil
     }
 }
 
-func (t *trackerServer) ReportMissing(args *trackerrpc.ReportArgs, reply *trackerrpc.UpdateReply) error {
-    replyChan := make(chan *trackerrpc.UpdateReply)
+func (dt *dummyTracker) ReportMissing(args *trackerproto.ReportArgs, reply *trackerproto.UpdateReply) error {
+    replyChan := make(chan *trackerproto.UpdateReply)
     report := &Report{
         Args:  args,
         Reply: replyChan}
-    t.reports <- report
+    dt.reports <- report
     *reply = *(<-replyChan)
     return nil
 }
 
-func (t *trackerServer) ConfirmChunk(args *trackerrpc.ConfirmArgs, reply *trackerrpc.UpdateReply) error {
-    replyChan := make(chan *trackerrpc.UpdateReply)
+func (dt *dummyTracker) ConfirmChunk(args *trackerproto.ConfirmArgs, reply *trackerproto.UpdateReply) error {
+    replyChan := make(chan *trackerproto.UpdateReply)
     confirm := &Confirm{
         Args:  args,
         Reply: replyChan}
-    t.confirms <- confirm
+    dt.confirms <- confirm
     *reply = *(<-replyChan)
     return nil
 }
 
-func (t *trackerServer) CreateEntry(args *trackerrpc.CreateArgs, reply *trackerrpc.UpdateReply) error {
-    replyChan := make(chan *trackerrpc.UpdateReply)
+func (dt *dummyTracker) CreateEntry(args *trackerproto.CreateArgs, reply *trackerproto.UpdateReply) error {
+    replyChan := make(chan *trackerproto.UpdateReply)
     create := &Create{
         Args:  args,
         Reply: replyChan}
-    t.creates <- create
+    dt.creates <- create
     *reply = *(<-replyChan)
     return nil
 }
 
-func (t *trackerServer) RequestChunk(args *trackerrpc.RequestArgs, reply *trackerrpc.RequestReply) error {
-    replyChan := make(chan *trackerrpc.RequestReply)
+func (dt *dummyTracker) RequestChunk(args *trackerproto.RequestArgs, reply *trackerproto.RequestReply) error {
+    replyChan := make(chan *trackerproto.RequestReply)
     request := &Request{
         Args:  args,
         Reply: replyChan}
-    t.requests <- request
+    dt.requests <- request
     *reply = *(<-replyChan)
     return nil
 }
 
-func (t *trackerServer) GetTrackers(args *trackerrpc.TrackersArgs, reply *trackerrpc.TrackersReply) error {
-    replyChan := make(chan *trackerrpc.TrackersReply)
+func (dt *dummyTracker) GetTrackers(args *trackerproto.TrackersArgs, reply *trackerproto.TrackersReply) error {
+    replyChan := make(chan *trackerproto.TrackersReply)
     trackers := &GetTrackers{
         Args:  args,
         Reply: replyChan}
-    t.getTrackers <- trackers
-    *trackers = *(<-replyChan)
+    dt.getTrackers <- trackers
+    *reply = *(<-replyChan)
     return nil
 }
 
-func (t *trackerServer) eventHandler() {
+func (dt *dummyTracker) eventHandler() {
     for {
         select {
-        case rep := <-t.reports:
+        case rep := <-dt.reports:
             // A client has reported that it does not have a chunk
-            if tor, ok := t.torrents[rep.Args.Chunk.ID]; !ok {
+            if tor, ok := dt.torrents[rep.Args.Chunk.ID]; !ok {
                 // File does not exist
-                rep.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.FileNotfound}
-            } else if req.Args.Chunk.ChunkNum < 0 || req.Args.Chunk.ChunkNum >= tor.NumChunks() {
+                rep.Reply <- &trackerproto.UpdateReply{Status: trackerproto.FileNotFound}
+            } else if rep.Args.Chunk.ChunkNum < 0 || rep.Args.Chunk.ChunkNum >= torrent.NumChunks(tor) {
                 // ChunkNum is not right for this file
-                rep.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OutOfRange}
+                rep.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OutOfRange}
             } else {
                 // Remove this torrent from the client's record.
-                delete(t.peers[rep.Args.Chunk], rep.Args.HostPort)
+                delete(dt.peers[rep.Args.Chunk], rep.Args.HostPort)
             }
-        case conf := <-t.confirms:
+        case conf := <-dt.confirms:
             // A client has confirmed that it has a chunk
-            if tor, ok := t.torrents[conf.Args.Chunk.ID]; !ok {
+            if tor, ok := dt.torrents[conf.Args.Chunk.ID]; !ok {
                 // File does not exist
-                conf.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.FileNotfound}
-            } else if conf.Args.Chunk.ChunkNum < 0 || conf.Args.Chun.ChunkNum >= tor.NumChunks() {
+                conf.Reply <- &trackerproto.UpdateReply{Status: trackerproto.FileNotFound}
+            } else if conf.Args.Chunk.ChunkNum < 0 || conf.Args.Chunk.ChunkNum >= torrent.NumChunks(tor) {
                 // ChunkNum is not right for this file
-                conf.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.OutOfRange}
+                conf.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OutOfRange}
             } else {
                 // Mark that the client has this chunk, creating the map for this
                 // chunk if necessary.
-                if _, ok := t.peers[conf.Args.ChunkID]; !ok {
-                    t.peers.[conf.Args.ChunkID] = make(map[string]struct{})
+                if _, ok := dt.peers[conf.Args.Chunk]; !ok {
+                    dt.peers[conf.Args.Chunk] = make(map[string]struct{})
                 }
-                t.peers[conf.Args.ChunkID][conf.Args.HostPort] = struct{}{}
+                dt.peers[conf.Args.Chunk][conf.Args.HostPort] = struct{}{}
             }
-        case cre := <-t.creates:
+        case cre := <-dt.creates:
             // A client has requested to create a new file
-            if tor, ok := t.tor[cre.Args.Torrent.ID]; !ok {
+            if _, ok := dt.torrents[cre.Args.Torrent.ID]; !ok {
                 // ID not in use, so add an entry for it.
-                t.tor[cre.Args.Torrent.ID] = cre.Args.Torrent
+                dt.torrents[cre.Args.Torrent.ID] = cre.Args.Torrent
             } else {
                 // File already exists, so tell the client that this ID is invalid
-                cre.Reply <- &trackerrpc.UpdateReply{Status: trackerrpc.InvalidID}
+                cre.Reply <- &trackerproto.UpdateReply{Status: trackerproto.InvalidID}
             }
-        case req := <-t.requests:
+        case req := <-dt.requests:
             // A client has requested a list of users with a certain chunk
-            if tor, ok := t.torrents[req.Args.Chunk.ID]; !ok {
+            if tor, ok := dt.torrents[req.Args.Chunk.ID]; !ok {
                 // File does not exist
-                req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.FileNotfound}
-            } else if req.Args.Chunk.ChunkNum < 0 || req.Args.Chunk.ChunkNum >= tor.NumChunks() {
+                req.Reply <- &trackerproto.RequestReply{Status: trackerproto.FileNotFound}
+            } else if req.Args.Chunk.ChunkNum < 0 || req.Args.Chunk.ChunkNum >= torrent.NumChunks(tor) {
                 // ChunkNum is not right for this file
-                req.Reply <- &trackerrpc.RequestReply{Status: trackerrpc.OutOfRange}
+                req.Reply <- &trackerproto.RequestReply{Status: trackerproto.OutOfRange}
             } else {
                 // Get a list of all peers, then respond
                 peers := make([]string, 0)
-                for k, _ := range t.peers[req.Args.Chunk] {
-                    append(peers, k)
+                for k, _ := range dt.peers[req.Args.Chunk] {
+                    peers = append(peers, k)
                 }
-                req.Reply <- &trackerrpc.RequestReply{
-                    Status: trackerrpc.OK,
+                req.Reply <- &trackerproto.RequestReply{
+                    Status: trackerproto.OK,
                     Peers:  peers}
             }
-        case gt := <-t.getTrackers:
+        case gt := <-dt.getTrackers:
             // Reply with only this node's host:port.
-            gt.Reply <- &trackerrpc.TrackersReply{
-                Status:    trackerrpc.OK,
-                HostPorts: []string{t.hostPort}}
+            gt.Reply <- &trackerproto.TrackersReply{
+                Status:    trackerproto.OK,
+                HostPorts: []string{dt.hostPort}}
         }
     }
 }
