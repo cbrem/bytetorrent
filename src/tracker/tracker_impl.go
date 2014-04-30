@@ -23,6 +23,7 @@ package tracker
 
 import (
 	"container/list"
+	//"fmt"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -99,7 +100,7 @@ type GetTrackers struct {
 
 type Pending struct {
 	Value trackerproto.Operation
-	Reply *trackerproto.UpdateReply
+	Reply chan *trackerproto.UpdateReply
 }
 
 type PaxosReply struct {
@@ -185,6 +186,7 @@ func NewTrackerServer(masterServerHostPort string, numNodes, port, nodeID int) (
 		requests:             make(chan *Request),
 		creates:              make(chan *Create),
 		getTrackers:          make(chan *GetTrackers),
+		pending:              make(chan *Pending),
 		myN:                  nodeID,
 		highestN:             0,
 		accV:                 trackerproto.Operation{OpType: trackerproto.None},
@@ -200,25 +202,25 @@ func NewTrackerServer(masterServerHostPort string, numNodes, port, nodeID int) (
 		dbstall:              make(chan int),
 		dbstallall:           make(chan struct{})}
 
+	// Configure this TrackerServer to receive RPCs over HTTP on a
+	// trackerproto.Tracker interface.
+	if regErr := rpc.RegisterName("RemoteTracker", WrapRemote(t)); regErr != nil {
+		return nil, regErr
+	}
+
+	// New configure this TrackerServer to receive RPCs over HTTP on a
+	// trackerproto.Paxos interface
+	if regErr := rpc.RegisterName("PaxosTracker", WrapPaxos(t)); regErr != nil {
+		return nil, regErr
+	}
+	rpc.HandleHTTP()
+
 	// Attempt to service connections on the given port.
 	ln, lnErr := net.Listen("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
 	if lnErr != nil {
 		return nil, lnErr
 	}
 
-	// Configure this TrackerServer to receive RPCs over HTTP on a
-	// trackerproto.Tracker interface.
-	if regErr := rpc.Register(WrapRemote(t)); regErr != nil {
-		return nil, regErr
-	}
-
-	// New configure this TrackerServer to receive RPCs over HTTP on a
-	// trackerproto.Paxos interface
-	if regErr := rpc.Register(WrapPaxos(t)); regErr != nil {
-		return nil, regErr
-	}
-
-	rpc.HandleHTTP()
 	go http.Serve(ln, nil)
 
 	// Wait for all TrackerServers to join the ring.
@@ -404,7 +406,7 @@ func (t *trackerServer) masterAwaitJoin() error {
 		copy(nodes, t.nodes)
 		register.Reply <- &trackerproto.RegisterReply{
 			Status:  status,
-			Servers: nodes}
+			Trackers: nodes}
 	}
 
 	// We've heard from all nodes.
@@ -426,7 +428,7 @@ func (t *trackerServer) slaveAwaitJoin() error {
 	// Make RegisterServer RPCs to the master trackerServer until it confirms
 	// that the ring is complete.
 	args := &trackerproto.RegisterArgs{
-		ServerInfo: trackerproto.Node{
+		TrackerInfo: trackerproto.Node{
 			HostPort: net.JoinHostPort("localhost", strconv.Itoa(t.port)),
 			NodeID:   t.nodeID}}
 	reply := &trackerproto.RegisterReply{}
@@ -447,8 +449,8 @@ func (t *trackerServer) slaveAwaitJoin() error {
 	}
 
 	// Record which nodes are in the ring, and return.
-	t.nodes = make([]trackerproto.Node, len(reply.Servers))
-	copy(t.nodes, reply.Servers)
+	t.nodes = make([]trackerproto.Node, len(reply.Trackers))
+	copy(t.nodes, reply.Trackers)
 	return nil
 }
 
@@ -474,6 +476,7 @@ func (t *trackerServer) eventHandler() {
 					close(t.dbcontinue)
 				})
 		case prep := <-t.prepares:
+			//fmt.Println("EH: Prepare")
 			// Handle prepare messages
 			reply := &trackerproto.PrepareReply{
 				PaxNum: t.accN,
@@ -502,6 +505,7 @@ func (t *trackerServer) eventHandler() {
 				prep.Reply <- reply
 			}
 		case acc := <-t.accepts:
+			//fmt.Println("EH: Accept")
 			// Handle accept messages
 			var status trackerproto.Status
 			if acc.Args.SeqNum < t.seqNum {
@@ -516,13 +520,15 @@ func (t *trackerServer) eventHandler() {
 			}
 			acc.Reply <- &trackerproto.AcceptReply{Status: status}
 		case com := <-t.commits:
+			//fmt.Println("EH: Commit")
 			// Handle commit messages
 			v := com.Args.Value
-			if v.SeqNum == t.seqNum {
+			if com.Args.SeqNum == t.seqNum {
 				t.commitOp(v)
 			}
 			com.Reply <- &trackerproto.CommitReply{}
 		case get := <-t.gets:
+			//fmt.Println("EH: Get")
 			// Another tracker has requested a previously commited op
 			s := get.Args.SeqNum
 			if s > t.seqNum {
@@ -534,6 +540,7 @@ func (t *trackerServer) eventHandler() {
 					Value:  t.log[s]}
 			}
 		case rep := <-t.reports:
+			//fmt.Println("EH: Report")
 			// A client has reported that it does not have a chunk
 			tor, ok := t.torrents[rep.Args.Chunk.ID]
 			if !ok {
@@ -544,7 +551,7 @@ func (t *trackerServer) eventHandler() {
 				rep.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OutOfRange}
 			} else {
 				// Put the operation in the pending list
-				op := &trackerproto.Operation{
+				op := trackerproto.Operation{
 					OpType:     trackerproto.Delete,
 					Chunk:      rep.Args.Chunk,
 					ClientAddr: rep.Args.HostPort}
@@ -553,6 +560,7 @@ func (t *trackerServer) eventHandler() {
 					Reply: rep.Reply}
 			}
 		case conf := <-t.confirms:
+			//fmt.Println("EH: Confirm")
 			// A client has confirmed that it has a chunk
 			tor, ok := t.torrents[conf.Args.Chunk.ID]
 			if !ok {
@@ -563,7 +571,7 @@ func (t *trackerServer) eventHandler() {
 				conf.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OutOfRange}
 			} else {
 				// Put the operation in the pending list
-				op := &trackerproto.Operation{
+				op := trackerproto.Operation{
 					OpType:     trackerproto.Add,
 					Chunk:      conf.Args.Chunk,
 					ClientAddr: conf.Args.HostPort}
@@ -572,12 +580,13 @@ func (t *trackerServer) eventHandler() {
 					Reply: conf.Reply}
 			}
 		case cre := <-t.creates:
+			//fmt.Println("EH: Create")
 			// First check that all of the suggested nodes are in the cluster
 			correctTrackers := true
 			for _, tortrack := range cre.Args.Torrent.TrackerNodes {
 				inCluster := false
 				for _, tracker := range t.nodes {
-					if tracker == tortrack {
+					if tracker.HostPort == tortrack.HostPort {
 						inCluster = true
 					}
 				}
@@ -588,7 +597,7 @@ func (t *trackerServer) eventHandler() {
 			for _, tracker := range t.nodes {
 				inCluster := false
 				for _, tortrack := range cre.Args.Torrent.TrackerNodes {
-					if tracker == tortrack {
+					if tracker.HostPort == tortrack.HostPort {
 						inCluster = true
 					}
 				}
@@ -600,21 +609,24 @@ func (t *trackerServer) eventHandler() {
 			}
 
 			// A client has requested to create a new file
-			tor, ok := t.torrents[cre.Args.Torrent.ID]
+			_, ok := t.torrents[cre.Args.Torrent.ID]
 			if !ok {
+				//fmt.Println("Sending to pending")
 				// ID not in use,
 				// So make the pending request for this
-				op := &trackerproto.Operation{
+				op := trackerproto.Operation{
 					OpType:  trackerproto.Create,
 					Torrent: cre.Args.Torrent}
 				t.pending <- &Pending{
 					Value: op,
 					Reply: cre.Reply}
+				//fmt.Println("Sent")
 			} else {
 				// File already exists, so tell the client that this ID is invalid
 				cre.Reply <- &trackerproto.UpdateReply{Status: trackerproto.InvalidID}
 			}
 		case req := <-t.requests:
+			//fmt.Println("EH: Request")
 			// A client has requested a list of users with a certain chunk
 			tor, ok := t.torrents[req.Args.Chunk.ID]
 			if !ok {
@@ -627,13 +639,14 @@ func (t *trackerServer) eventHandler() {
 				// Get a list of all peers, then respond
 				peers := make([]string, 0)
 				for k, _ := range t.peers[req.Args.Chunk] {
-					append(peers, k)
+					peers = append(peers, k)
 				}
 				req.Reply <- &trackerproto.RequestReply{
 					Status: trackerproto.OK,
 					Peers:  peers}
 			}
 		case gt := <-t.getTrackers:
+			//fmt.Println("EH: GetTrackers")
 			// A client has requested a list of users with a certain chunk
 			hostPorts := make([]string, t.numNodes)
 			for i, node := range t.nodes {
@@ -643,6 +656,7 @@ func (t *trackerServer) eventHandler() {
 				Status:    trackerproto.OK,
 				HostPorts: hostPorts}
 		case seqNum := <-t.outOfDate:
+			//fmt.Println("EH: OutOfDate")
 			// t is out of date
 			// Needs to catch up to seqNum
 			t.catchUp(seqNum)
@@ -652,14 +666,17 @@ func (t *trackerServer) eventHandler() {
 
 // t commits the operation to memory, and logs it
 func (t *trackerServer) commitOp(v trackerproto.Operation) {
+	//fmt.Println("Commiting")
+	//fmt.Println("v: " + strconv.Itoa(int(v.OpType)))
+	//fmt.Println("v: " + v.ClientAddr)
 	// Log the change
 	t.log[t.seqNum] = v
 	t.seqNum++
 	t.accN = 0
-	t.accV = tracker.Opp{OpType: trackerproto.None}
+	t.accV = trackerproto.Operation{OpType: trackerproto.None}
 
 	// Now make the change
-	key := v.ID + ":" + strconv.Itoa(v.ChunkNum)
+	key := v.Chunk
 	m, ok := t.peers[key]
 	if !ok {
 		t.peers[key] = make(map[string](struct{}))
@@ -668,7 +685,7 @@ func (t *trackerServer) commitOp(v trackerproto.Operation) {
 
 	if v.OpType == trackerproto.Add {
 		m[v.ClientAddr] = struct{}{}
-	} else if v.OpType == trackerproto.Remove {
+	} else if v.OpType == trackerproto.Delete {
 		delete(m, v.ClientAddr)
 	} else if v.OpType == trackerproto.Create {
 		t.torrents[v.Torrent.ID] = v.Torrent
@@ -677,9 +694,11 @@ func (t *trackerServer) commitOp(v trackerproto.Operation) {
 	// Go through the list of ops that we have pending
 	// If this is one of those, then respond
 	t.pendingMut.Lock()
-	for e := t.pendingOps.Front(); !done && e != nil; e = e.Next() {
+	for e := t.pendingOps.Front(); e != nil; e = e.Next() {
 		pen := e.Value.(*Pending).Value
-		if pen.OpType == v.OpType && pen.ID == v.ID && pen.ChunkNum == v.ChunkNum && pen.ClientAddr == v.ClientAddr {
+		//fmt.Println("pen: " + strconv.Itoa(int(v.OpType)))
+		//fmt.Println("pen: " + pen.ClientAddr)
+		if pen.OpType == v.OpType && pen.Chunk == v.Chunk && pen.ClientAddr == v.ClientAddr {
 			t.pendingOps.Remove(e)
 			e.Value.(*Pending).Reply <- &trackerproto.UpdateReply{Status: trackerproto.OK}
 		}
@@ -726,12 +745,12 @@ func (t *trackerServer) catchUp(target int) {
 
 func (t *trackerServer) sendMess(id int, mess *PaxosBroadcast) {
 	reqPaxNum := mess.MyN
-	if mess.Type == Prepare {
+	if mess.Type == PaxosPrepare {
 		args := &trackerproto.PrepareArgs{
 			PaxNum: reqPaxNum,
-			SeqNum: mess.seqNum}
-		reply := &trackerproto.cPrepareReply{}
-		if err := t.trackers[id].Call("Paxos.Prepare", args, reply); err != nil {
+			SeqNum: mess.SeqNum}
+		reply := &trackerproto.PrepareReply{}
+		if err := t.trackers[id].Call("PaxosTracker.Prepare", args, reply); err != nil {
 			// Error: Tell the paxosHandler that we were "rejected"
 			mess.Reply <- &PaxosReply{Status: trackerproto.Reject}
 		} else {
@@ -743,63 +762,73 @@ func (t *trackerServer) sendMess(id int, mess *PaxosBroadcast) {
 				Value:     reply.Value,
 				SeqNum:    reply.SeqNum}
 		}
-	} else if mess.Type == Accept {
+	} else if mess.Type == PaxosAccept {
 		args := &trackerproto.AcceptArgs{
 			PaxNum: reqPaxNum,
-			SeqNum: mess.seqNum,
+			SeqNum: mess.SeqNum,
 			Value:  mess.Value}
 		reply := &trackerproto.AcceptReply{}
-		if err := t.trackers[id].Call("Paxos.Accept", args, reply); err != nil {
+		if err := t.trackers[id].Call("PaxosTracker.Accept", args, reply); err != nil {
 			// Error: Tell the paxosHandler that we were "rejected"
 			mess.Reply <- &PaxosReply{Status: trackerproto.Reject}
 		} else {
 			mess.Reply <- &PaxosReply{
 				Status:    reply.Status,
 				ReqPaxNum: reqPaxNum,
-				SeqNum:    mess.seqNum}
+				SeqNum:    mess.SeqNum}
 		}
-	} else if mess.Type == Commit {
+	} else if mess.Type == PaxosCommit {
 		args := &trackerproto.CommitArgs{
-			SeqNum: mess.seqNum,
+			SeqNum: mess.SeqNum,
 			Value:  mess.Value}
 		reply := &trackerproto.CommitReply{}
-		t.trackers[id].Call("Paxos.Commit", args, reply)
+		t.trackers[id].Call("PaxosTracker.Commit", args, reply)
+
+		// This tells the paxosHandler when this tracker has commited the result
+		if id == t.nodeID {
+			mess.Reply <- &PaxosReply{Status: trackerproto.OK}
+		} else {
+			mess.Reply <- &PaxosReply{Status: trackerproto.Reject}
+		}
 	}
 }
 
 func (t *trackerServer) paxosHandler() {
-	initPaxos := make(chan struct{})
+	initPaxos := make(chan struct{}, 1)
 	prepareReply := make(chan *PaxosReply)
 	acceptReply := make(chan *PaxosReply)
+	prepPhase := false
+	accPhase := false
 	inPaxos := false
 	backoff := 1
 	responses := 0
 	accN := 0
-	accV := trackerproto.Operation{Type: trackerproto.None}
+	accV := trackerproto.Operation{OpType: trackerproto.None}
 	oks := 0
 	for {
 		select {
 		case <-t.dbclose:
+			//fmt.Println("dbclose")
 			// Closing (for debugging / testing reasons)
 			return
 		case <-t.dbstallall:
+			//fmt.Println("dbstallall")
 			// Stalling (for debugging / testing reasons)
 			// Wait until we receive a signal on t.dbcontinue,
 			// then keep going
 			<-t.dbcontinue
-		case op := <-t.pending:
-			t.pendingMut.Lock()
-			t.pendingOps.PushBack(op)
-			t.pendingMut.Unlock()
-			if !inPaxos {
-				initPaxos <- struct{}{}
-			}
 		case <-initPaxos:
+			//fmt.Println("Starting Paxos")
 			inPaxos = true
+			accV = trackerproto.Operation{OpType: trackerproto.None}
 			t.myN = (t.highestN - (t.highestN % t.numNodes)) + (t.numNodes + t.nodeID)
 			backoff = 1
 			responses = 0
 			oks = 0
+			prepPhase = true
+			accPhase = false
+			//fmt.Println("Starting Paxos")
+			//fmt.Println(strconv.Itoa(int(accV.OpType)))
 			for id := 0; id < t.numNodes; id++ {
 				mess := &PaxosBroadcast{
 					MyN:    t.myN,
@@ -808,14 +837,24 @@ func (t *trackerServer) paxosHandler() {
 					SeqNum: t.seqNum}
 				go t.sendMess(id, mess)
 			}
+		case op := <-t.pending:
+			//fmt.Println("Received from pending")
+			t.pendingMut.Lock()
+			t.pendingOps.PushBack(op)
+			t.pendingMut.Unlock()
+			if !inPaxos {
+				initPaxos <- struct{}{}
+			}
 		case prep := <-prepareReply:
+			//fmt.Println("Prepare received")
 			// First check that this is a response to the current PaxosMessage
-			if prep.ReqPaxNum == t.myN {
+			if prep.ReqPaxNum == t.myN && prepPhase {
 				responses++
 				if prep.Status == trackerproto.OK {
 					oks++
-					if prep.Value.Type != trackerproto.None {
+					if prep.Value.OpType != trackerproto.None {
 						if prep.PaxNum > accN {
+							//fmt.Println("Changing accV")
 							accN = prep.PaxNum
 							accV = prep.Value
 						}
@@ -825,6 +864,7 @@ func (t *trackerServer) paxosHandler() {
 				}
 
 				if oks > (t.numNodes / 2) {
+					//fmt.Println(strconv.Itoa(int(accV.OpType)))
 					if accV.OpType == trackerproto.None {
 						// Check that there's something in the list
 						t.pendingMut.Lock()
@@ -839,16 +879,17 @@ func (t *trackerServer) paxosHandler() {
 						// Broadcast the accept message
 						// First increment the myN,
 						// So that replies to previous messages will be ignored
-						t.myN += t.numNodes
 						responses = 0
 						oks = 0
+						prepPhase = false
+						accPhase = true
 						for id := 0; id < t.numNodes; id++ {
 							mess := &PaxosBroadcast{
 								MyN:    t.myN,
 								Type:   PaxosAccept,
 								Reply:  acceptReply,
 								SeqNum: t.seqNum,
-								Value:  &accV}
+								Value:  accV}
 							go t.sendMess(id, mess)
 						}
 					}
@@ -861,30 +902,44 @@ func (t *trackerServer) paxosHandler() {
 				}
 			}
 		case acc := <-acceptReply:
+			//fmt.Println("Accept Received")
 			// Received the reply to an accept message
-			if acc.ReqPaxNum == t.myN && inPaxos {
+			if acc.ReqPaxNum == t.myN && accPhase {
 				responses++
 				if acc.Status == trackerproto.OK {
 					oks++
 				}
 
 				if oks > (t.numNodes / 2) {
+					accPhase = false
 					seqNum := t.seqNum
+					comReply := make(chan *PaxosReply, t.numNodes)
 					for id := 0; id < t.numNodes; id++ {
 						mess := &PaxosBroadcast{
 							MyN:    t.myN,
 							Type:   PaxosCommit,
+							Reply:  comReply,
 							SeqNum: seqNum,
-							Value:  &accV}
+							Value:  accV}
 						go t.sendMess(id, mess)
+					}
+					// This line says:
+					//  "wait until this tracker has finished commiting before continuing"
+					ready := false
+					for !ready {
+						rep := <-comReply
+						if rep.Status == trackerproto.OK {
+							ready = true
+						}
 					}
 
 					t.pendingMut.Lock()
-					if pendingOps.Len() > 0 {
+					if t.pendingOps.Len() > 0 {
 						// TODO
 						// Skip the prepare phase
 						initPaxos <- struct{}{}
 					} else {
+						accV = trackerproto.Operation{OpType: trackerproto.None}
 						inPaxos = false
 					}
 					t.pendingMut.Unlock()
