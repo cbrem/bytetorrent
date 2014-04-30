@@ -201,26 +201,30 @@ func newTorrentInfo(t *trackerTester, trackersGood bool, numChunks int) (torrent
 
 // test GetTrackers for a single node
 func getTrackersTestOneNode() bool {
-	tester, err := createTracker("", 1, 9090, 0)
+	cluster, err := createCluster(1)
 	if err != nil {
 		LOGE.Println("Error creating tracker")
+		closeCluster(cluster)
 		return false
 	}
 	LOGE.Println("Getting Trackers")
-	trackers, err := tester.GetTrackers()
+	trackers, err := cluster[0].GetTrackers()
 	if err != nil {
 		LOGE.Println("Error getting trackers")
 		LOGE.Println(err.Error())
+		closeCluster(cluster)
 		return false
 	}
 	if trackers.Status != trackerproto.OK {
 		LOGE.Println("Get Trackers: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 	LOGE.Println("Trackers Found:")
 	for _, v := range trackers.HostPorts {
 		LOGE.Println(v)
 	}
+	closeCluster(cluster)
 	return true
 }
 
@@ -257,43 +261,50 @@ func getTrackersTestThreeNodes() bool {
 
 // test CreateEntry with single node
 func createEntryTestOneNode() bool {
-	tester, err := createTracker("", 1, 9090, 0)
+	cluster, err := createCluster(1)
 	if err != nil {
 		LOGE.Println("Error creating tracker")
+		closeCluster(cluster)
 		return false
 	}
 
-	torrent, err := newTorrentInfo(tester, true, 3)
+	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 
 	// Test that we can add a torrent
-	reply, err := tester.CreateEntry(torrent)
+	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
 	// Test that we can't add the same torrent twice
-	reply, err = tester.CreateEntry(torrent)
+	reply, err = cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.InvalidID {
 		LOGE.Println("Create Entry: Status not InvalidID")
+		closeCluster(cluster)
 		return false
 	}
 
 	// Test a torrent with the wrong trackers
-	badtorrent, err := newTorrentInfo(tester, false, 5)
+	badtorrent, err := newTorrentInfo(cluster[0], false, 5)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
-	reply, err = tester.CreateEntry(badtorrent)
+	reply, err = cluster[0].CreateEntry(badtorrent)
 	if reply.Status != trackerproto.InvalidTrackers {
 		LOGE.Println("Create Entry: Status not InvalidTrackers")
+		closeCluster(cluster)
 		return false
 	}
+	closeCluster(cluster)
 	return true
 }
 
@@ -485,7 +496,7 @@ func testStress(total int) bool {
 	for fin < total {
 		<-doneChan
 		fin++
-		if fin % 10 == 0 {
+		if fin % 50 == 0 {
 			LOGE.Println("Finished: ", fin)
 		}
 	}
@@ -552,7 +563,7 @@ func testDualing(total int) bool {
 	for fin[0] + fin[1] < total {
 		id := <-doneChan
 		fin[id]++
-		if fin[0] + fin[1] % 10 == 0 {
+		if (fin[0] + fin[1]) % 50 == 0 {
 			LOGE.Println("Finished: ", fin[0], fin[1])
 		}
 	}
@@ -692,13 +703,6 @@ func testStalled() bool {
 		return false
 	}
 
-	// Stall for 15 seconds
-	if _, err := fmt.Fprintln(cluster[2].in, "15"); err != nil {
-		LOGE.Println("Could not stall node")
-		closeCluster(cluster)
-		return false
-	}
-
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
@@ -715,19 +719,32 @@ func testStalled() bool {
 	}
 
 	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
-	reply, err = cluster[0].ConfirmChunk(chunk, "banana")
-	if err != nil {
-		LOGE.Println("Error confirming chunk")
-		closeCluster(cluster)
-		return false
-	}
-	if reply.Status != trackerproto.OK {
-		LOGE.Println("Confirm Chunk: Status not OK")
+
+	// Stall for 5 seconds
+	LOGE.Println("Stalling tracker")
+	if _, err := fmt.Fprintln(cluster[2].in, "5"); err != nil {
+		LOGE.Println("Could not stall node")
 		closeCluster(cluster)
 		return false
 	}
 
-	// Try to do something on the stalled tracker
+	LOGE.Println("Sending Messages")
+	for i := 0; i < 50; i++ {
+		go func () {
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			conf, err := cluster[0].ConfirmChunk(chunk, strconv.Itoa(r.Int()))
+			if err != nil {
+				LOGE.Println(err.Error())
+			}
+			if conf.Status != trackerproto.OK {
+				LOGE.Println("Confirm Chunk: Status not OK")
+			}
+		} ()
+	}
+
+	// Call something on the stalled tracker
+	// The call will block until the tracker comes back online
+	LOGE.Println("Call on stalled tracker")
 	reply, err = cluster[2].ConfirmChunk(chunk, "apple")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
@@ -736,16 +753,18 @@ func testStalled() bool {
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		LOGE.Println(reply.Status)
 		closeCluster(cluster)
 		return false
 	}
 
-	i := 0
+	LOGE.Println("Verifying logs")
+	seqNum := 0
 	ok := true
 	matching := true
 	for matching && ok {
-		reply0, err0 := cluster[0].GetOp(i)
-		reply2, err2 := cluster[2].GetOp(i)
+		reply0, err0 := cluster[0].GetOp(seqNum)
+		reply2, err2 := cluster[2].GetOp(seqNum)
 
 		if err0 != nil || err2 != nil {
 			LOGE.Println("Error getting operation.")
@@ -759,6 +778,7 @@ func testStalled() bool {
 		val2 := reply2.Value
 		valsEq := val0.OpType == val2.OpType && val0.Chunk == val2.Chunk && val0.ClientAddr == val2.ClientAddr
 		matching = matching && valsEq && (reply0.Status == reply2.Status)
+		seqNum++
 	}
 
 	if matching {
@@ -769,58 +789,60 @@ func testStalled() bool {
 }
 
 func main() {
-	//LOGE.Println("----------- getTrackersTestOneNode")
-	//if !getTrackersTestOneNode() {
-	//	LOGE.Println("Failed getTrackersTestOneNode")
-	//}
+	/*
+	LOGE.Println("----------- getTrackersTestOneNode")
+	if !getTrackersTestOneNode() {
+		LOGE.Println("----------- Failed getTrackersTestOneNode")
+	}
 
-	//LOGE.Println("----------- getTrackersTestThreeNodes")
-	//if !getTrackersTestThreeNodes() {
-	//	LOGE.Println("Failed getTrackersTestThreeNodes")
-	//}
+	LOGE.Println("----------- getTrackersTestThreeNodes")
+	if !getTrackersTestThreeNodes() {
+		LOGE.Println("----------- Failed getTrackersTestThreeNodes")
+	}
 
-	//LOGE.Println("----------- createEntryTestOneNode")
-	//if !createEntryTestOneNode() {
-	//	LOGE.Println("Failed createEntryTestOneNode")
-	//}
+	LOGE.Println("----------- createEntryTestOneNode")
+	if !createEntryTestOneNode() {
+		LOGE.Println("----------- Failed createEntryTestOneNode")
+	}
 
-	//LOGE.Println("----------- createEntryTestThreeNodes")
-	//if !createEntryTestThreeNodes() {
-	//	LOGE.Println("Failed createEntryTestThreeNodes")
-	//}
+	LOGE.Println("----------- createEntryTestThreeNodes")
+	if !createEntryTestThreeNodes() {
+		LOGE.Println("----------- Failed createEntryTestThreeNodes")
+	}
 
-	//LOGE.Println("----------- testCluster one node")
-	//if !testCluster(1) {
-	//	LOGE.Println("Failed testCluster one node")
-	//}
+	LOGE.Println("----------- testCluster one node")
+	if !testCluster(1) {
+		LOGE.Println("----------- Failed testCluster one node")
+	}
 
-	//LOGE.Println("----------- testCluster three nodes")
-	//if !testCluster(3) {
-	//	LOGE.Println("Failed testCluster three nodes")
-	//}
+	LOGE.Println("----------- testCluster three nodes")
+	if !testCluster(3) {
+		LOGE.Println("----------- Failed testCluster three nodes")
+	}
 
 	LOGE.Println("----------- testStress")
 	if !testStress(100) {
-		LOGE.Println("Failed testStress")
+		LOGE.Println("----------- Failed testStress")
 	}
 
 	LOGE.Println("----------- testDualing")
-	if !testDualing(30) {
-		LOGE.Println("Failed testDualing")
+	if !testDualing(500) {
+		LOGE.Println("----------- Failed testDualing")
 	}
 
-	//LOGE.Println("----------- testClosed")
-	//if !testClosed() {
-	//	LOGE.Println("Failed testClosed")
-	//}
+	LOGE.Println("----------- testClosed")
+	if !testClosed() {
+		LOGE.Println("----------- Failed testClosed")
+	}
 
-	//LOGE.Println("----------- testClosedTwo")
-	//if !testClosedTwo() {
-	//	LOGE.Println("Failed testClosedTwo")
-	//}
+	LOGE.Println("----------- testClosedTwo")
+	if !testClosedTwo() {
+		LOGE.Println("----------- Failed testClosedTwo")
+	}
+	*/
 
-	//LOGE.Println("----------- testStalled")
-	//if !testStalled() {
-	//	LOGE.Println("Failed testStalled")
-	//}
+	LOGE.Println("----------- testStalled")
+	if !testStalled() {
+		LOGE.Println("----------- Failed testStalled")
+	}
 }
