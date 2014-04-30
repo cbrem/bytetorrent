@@ -601,11 +601,11 @@ func testClosed() bool {
 	}
 
 	// Close one of the nodes
-	if _, err := fmt.Fprintln(cluster[2].in, "0"); err != nil {
-		LOGE.Println("Could not close node")
-		closeCluster(cluster)
-		return false
-	}
+	//if _, err := fmt.Fprintln(cluster[2].in, "0"); err != nil {
+	//	LOGE.Println("Could not close node")
+	//	closeCluster(cluster)
+	//	return false
+	//}
 
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
