@@ -165,7 +165,9 @@ func (t *trackerTester) ReportMissing(chunk torrentproto.ChunkID, hostPort strin
 func newTorrentInfo(t *trackerTester, trackersGood bool, numChunks int) (torrentproto.Torrent, error) {
 	var trackernodes []torrentproto.TrackerNode
 	if trackersGood {
+		LOGE.Println(1)
 		trackers, err := t.GetTrackers()
+		LOGE.Println(2)
 		if err != nil || trackers.Status != trackerproto.OK {
 			LOGE.Println("Get Trackers: ", err)
 			return torrentproto.Torrent{}, errors.New("Get Trackers failed")
@@ -600,13 +602,15 @@ func testClosed() bool {
 		return false
 	}
 
+	LOGE.Println("Killing Process")
 	// Close one of the nodes
-	//if _, err := fmt.Fprintln(cluster[2].in, "0"); err != nil {
-	//	LOGE.Println("Could not close node")
-	//	closeCluster(cluster)
-	//	return false
-	//}
+	if err := cluster[2].cmd.Process.Kill(); err != nil {
+		LOGE.Println("Could not close node")
+		closeCluster(cluster)
+		return false
+	}
 
+	LOGE.Println("Making Torrent")
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
@@ -615,6 +619,7 @@ func testClosed() bool {
 		return false
 	}
 
+	LOGE.Println("Sending Torrent to tracker")
 	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
@@ -622,6 +627,7 @@ func testClosed() bool {
 		return false
 	}
 
+	LOGE.Println("Confirming chunks")
 	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
 	reply, err = cluster[0].ConfirmChunk(chunk, "banana")
 	if err != nil {
