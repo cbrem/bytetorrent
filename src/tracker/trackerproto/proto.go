@@ -25,9 +25,9 @@ const (
 )
 
 type Operation struct {
-	OpType     OperationType   // Type of operation
+	OpType     OperationType        // Type of operation
 	Chunk      torrentproto.ChunkID // Torrent ID and chunk number
-	ClientAddr string          // The host:port of the client in question
+	ClientAddr string               // The host:port of the client in question
 	Torrent    torrentproto.Torrent // The torrent information (if you're trying to create a torrent)
 }
 
@@ -87,12 +87,12 @@ type CommitReply struct {
 
 type ReportArgs struct {
 	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
-	HostPort string          // host:port of the client
+	HostPort string               // host:port of the client
 }
 
 type ConfirmArgs struct {
 	Chunk    torrentproto.ChunkID // Torrent ID and chunk number
-	HostPort string          // host:port of the client
+	HostPort string               // host:port of the client
 }
 
 type RequestArgs struct {
