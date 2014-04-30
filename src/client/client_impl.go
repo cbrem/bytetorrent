@@ -4,6 +4,7 @@
 //  - make sure that this works with the whole torrent-validating sheme
 //  - don't just send chunkID in rpc... wrap this..also, make sure
 //    clientproto is using the right thing
+//  - are we naming the objects for RPCs correctly?
 
 package client
 
@@ -15,6 +16,7 @@ import (
     "net/http"
     "net/rpc"
     "os"
+    "time"
 
     "client/clientproto"
     "tracker/trackerproto"
@@ -100,13 +102,15 @@ func NewClient(localFiles map[torrentproto.ID]*clientproto.LocalFile, lfl LocalF
         closes: make(chan *Close),
         offers: make(chan *Offer),
         downloads: make(chan *Download),
+        downloadedChunks: make(chan torrentproto.ChunkID),
+        missingChunks: make(chan torrentproto.ChunkID),
         hostPort: hostPort}
 
     // Configure this Client to receive RPCs on RemoteClient at hostPort.
     if ln, err := net.Listen("tcp", hostPort); err != nil {
         // Failed to listen on the given host:port.
         return nil, err
-    } else if err := rpc.Register(Wrap(c)); err != nil {
+    } else if err := rpc.RegisterName("RemoteClient", Wrap(c)); err != nil {
         // Failed to register this Client for RPCs as a RemoteClient.
         return nil, err
     } else {
@@ -185,7 +189,7 @@ func (c *client) eventHandler() {
                 Operation: clientproto.LocalFileAdd})
 
             // Asynchronously download chunks of the file for this torrent.
-            go downloadFile(download, c.downloadedChunks)
+            go c.downloadFile(download)
 
         // Another Client has requested a chunk.
         case get := <- c.gets:
@@ -251,6 +255,8 @@ func (c *client) eventHandler() {
                 Operation: clientproto.LocalFileUpdate})
 
             // Offer this file to a Tracker.
+            //
+            // TODO: do this in a go routine?
             if trackerConn, err := getResponsiveTrackerNode(offer.Torrent); err != nil {
                 // Unable to get a responsive Tracker node.
                 offer.Reply <- nil
@@ -265,7 +271,7 @@ func (c *client) eventHandler() {
                             ChunkNum: chunkNum},
                         HostPort: c.hostPort}
                     reply := & trackerproto.UpdateReply{}
-                    if err := trackerConn.Call("Tracker.ConfirmChunk", args, reply); err != nil {
+                    if err := trackerConn.Call("RemoteTracker.ConfirmChunk", args, reply); err != nil {
                         // Previously responsive Tracker has failed.
                         offer.Reply <- err
                         return
@@ -334,7 +340,7 @@ func getResponsiveTrackerNode(t torrentproto.Torrent) (*rpc.Client, error) {
 //
 // TODO: do we have a function for offering just a chunk?
 // TODO: should this return an error if the chunks aren't available within some time?
-func downloadFile(download *Download, downloadedChunks chan torrentproto.ChunkID) {
+func (c *client) downloadFile(download *Download) {
     // Create a file to hold this chunk.
     if file, err := os.Create(download.Path); err != nil {
         // Failed to create file at given path.
@@ -345,25 +351,29 @@ func downloadFile(download *Download, downloadedChunks chan torrentproto.ChunkID
         download.Reply <- err
         return
     } else {
+        // Create a new random number generator to help provide load-balancing
+        // for this download.
+        r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
         // Download the chunks for this file in a random order.
-        for chunkNum := range rand.Perm(torrent.NumChunks(download.Torrent)) {
+        for _, chunkNum := range r.Perm(torrent.NumChunks(download.Torrent)) {
             chunkID := torrentproto.ChunkID {
                 ID: download.Torrent.ID,
                 ChunkNum: chunkNum}
             trackerArgs := & trackerproto.RequestArgs {Chunk: chunkID}
             trackerReply := & trackerproto.RequestReply {}
-            if err := trackerConn.Call("Tracker.RequestChunk", trackerArgs, trackerReply); err != nil {
+            if err := trackerConn.Call("RemoteTracker.RequestChunk", trackerArgs, trackerReply); err != nil {
                 // Failed to make RPC.
                 download.Reply <- err
                 return
-            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers); err != nil {
+            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
                 // Failed to download this chunk.
                 download.Reply <- err
                 return
             } else {
                 // Successfully downloaded and wrote this chunk.
                 // Inform the Client.
-                downloadedChunks <- chunkID
+                c.downloadedChunks <- chunkID
             }
         }
     }
@@ -376,19 +386,21 @@ func downloadFile(download *Download, downloadedChunks chan torrentproto.ChunkID
 // If it fails, it returns a non-nil error.
 //
 // TODO: maybe add timeouts so we don't get hung up on any peer?
-func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string) error {
+func downloadChunk(download *Download, file *os.File, chunkNum int, peers []string, r *rand.Rand) error {
     // Try peers until one responds with chunk.
+    // Randomize order to help balance load across peers.
     peerArgs := & clientproto.GetArgs{
         ChunkID: torrentproto.ChunkID {
             ID: download.Torrent.ID,
             ChunkNum: chunkNum}}
     peerReply := & clientproto.GetReply{}
     h := sha1.New()
-    for _, hostPort := range peers {
+    for _, peerNum := range r.Perm(len(peers)) {
+        hostPort := peers[peerNum]
         if peer, err := rpc.DialHTTP("tcp", hostPort); err != nil {
             // Failed to connect.
             continue
-        } else if err := peer.Call("Client.GetChunk", peerArgs, peerReply); err != nil {
+        } else if err := peer.Call("RemoteClient.GetChunk", peerArgs, peerReply); err != nil {
             // Failed to make RPC.
             continue
         }

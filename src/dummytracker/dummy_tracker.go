@@ -70,9 +70,12 @@ func New(hostPort string) (DummyTracker, error) {
     // Attempt to service connections on the given port.
     // Then, configure this TrackerServer to receive RPCs over HTTP on a
     // tracker.Tracker interface.
+    //
+    // TODO: update rpc.Register to use tracker.WrapRemote as soon as that
+    // compiles
     if ln, lnErr := net.Listen("tcp", hostPort); lnErr != nil {
         return nil, lnErr
-    } else if regErr := rpc.Register(Wrap(dt)); regErr != nil {
+    } else if regErr := rpc.RegisterName("RemoteTracker", Wrap(dt)); regErr != nil {
         return nil, regErr
     } else {
         rpc.HandleHTTP()
@@ -149,6 +152,7 @@ func (dt *dummyTracker) eventHandler() {
             } else {
                 // Remove this torrent from the client's record.
                 delete(dt.peers[rep.Args.Chunk], rep.Args.HostPort)
+                rep.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OK}
             }
         case conf := <-dt.confirms:
             // A client has confirmed that it has a chunk
@@ -165,12 +169,14 @@ func (dt *dummyTracker) eventHandler() {
                     dt.peers[conf.Args.Chunk] = make(map[string]struct{})
                 }
                 dt.peers[conf.Args.Chunk][conf.Args.HostPort] = struct{}{}
+                conf.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OK}
             }
         case cre := <-dt.creates:
             // A client has requested to create a new file
             if _, ok := dt.torrents[cre.Args.Torrent.ID]; !ok {
                 // ID not in use, so add an entry for it.
                 dt.torrents[cre.Args.Torrent.ID] = cre.Args.Torrent
+                cre.Reply <- &trackerproto.UpdateReply{Status: trackerproto.OK}
             } else {
                 // File already exists, so tell the client that this ID is invalid
                 cre.Reply <- &trackerproto.UpdateReply{Status: trackerproto.InvalidID}
