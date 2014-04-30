@@ -366,7 +366,18 @@ func (c *client) downloadFile(download *Download) {
                 // Failed to make RPC.
                 download.Reply <- err
                 return
-            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
+            } else if trackerReply.ChunkHash != download.Torrent.ChunkHashes[chunkNum] {
+                // This torrent is fake or corrupted.
+                // The hash in the torrent for this chunkNum and torrent ID
+                // (i.e. this ChunkID) does not match the hash for this ChunkID
+                // on the Tracker.
+                // Since the Tracker associates exactly one hash with each
+                // chunkNum and torrentID when a torrent is first registered,
+                // we will get this error if and only if the torrent contains
+                // a bad hash for this chunk.
+                download.Reply <- errors.New("Bad torrent file")
+                return
+            else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
                 // Failed to download this chunk.
                 download.Reply <- err
                 return

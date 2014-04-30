@@ -567,7 +567,8 @@ func (t *trackerServer) eventHandler() {
 				}
 				req.Reply <- &trackerproto.RequestReply{
 					Status: trackerproto.OK,
-					Peers:  peers}
+					Peers:  peers,
+					ChunkHash: tor.ChunkHashes[req.Args.Chunk.ChunkNum]}
 			}
 		case gt := <-t.getTrackers:
 			hostPorts := make([]string, t.numNodes)
