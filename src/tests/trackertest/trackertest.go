@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -18,7 +17,8 @@ import (
 )
 
 type trackerTester struct {
-	srv     *rpc.Client
+	cmd *exec.Cmd
+	srv *rpc.Client
 }
 
 type testFunc struct {
@@ -32,7 +32,9 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 	if numNodes <= 0 {
 		return nil, errors.New("numNodes <= 0")
 	}
-	basePort := 9091 + 41*(rand.Int() % 300)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	basePort := 9091 + 41*(r.Int() % 300)
 	cluster := make([](*trackerTester), numNodes)
 	doneChan := make(chan *trackerTester)
 	master := net.JoinHostPort("localhost", strconv.Itoa(basePort))
@@ -46,22 +48,15 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 	go func () {
 		// Start the master server
 		masterCmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(basePort), strconv.Itoa(numNodes), strconv.Itoa(0))
-		stderr, _ := masterCmd.StdoutPipe()
 
 		masterCmd.Start()
 		srv, err := rpc.DialHTTP("tcp", master)
 		for err != nil {
 			srv, err = rpc.DialHTTP("tcp", master)
 		}
-		doneChan <- &trackerTester{srv: srv}
-
-		for {
-			var out string
-			n, _ := fmt.Fscanln(stderr, &out)
-			if n != 0 {
-				LOGE.Println(out)
-			}
-		}
+		doneChan <- &trackerTester{
+			cmd: masterCmd,
+			srv: srv}
 	} ()
 
 	// Spawn the non-master trackers in the cluster
@@ -71,22 +66,15 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 			LOGE.Println(port)
 			trackcmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(port),
 					strconv.Itoa(numNodes), strconv.Itoa(id), master)
-			stderr, _ := trackcmd.StderrPipe()
 
 			trackcmd.Start()
 			srv, err := rpc.DialHTTP("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
 			for err != nil {
 				srv, err = rpc.DialHTTP("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
 			}
-			doneChan <- &trackerTester{srv: srv}
-
-			for {
-				var out string
-				n, _ := fmt.Fscanln(stderr, &out)
-				if n != 0 {
-					LOGE.Println(out)
-				}
-			}
+			doneChan <- &trackerTester{
+				cmd: trackcmd,
+				srv: srv}
 		} (i)
 	}
 
@@ -424,6 +412,21 @@ func testCluster(numNodes int) bool {
 	}
 }
 
+// Test with dualing leaders
+func testDualing() bool {
+	cluster, _ := createCluster(3)
+
+	LOGE.Println("Creating Torrent")
+	torrent, _ := newTorrentInfo(cluster[0], true, 3)
+	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
+
+	for i := 0; i < 2; i++ {
+		go func () {
+			
+		} ()
+	}
+}
+
 // Tests that a 3 node cluster can still operate when one node is closed.
 func testClosed() bool {
 	cluster, err := createCluster(3)
@@ -571,30 +574,35 @@ func main() {
 	//	LOGE.Println("Failed getTrackersTestOneNode")
 	//}
 
-	LOGE.Println("getTrackersTestThreeNodes")
-	if !getTrackersTestThreeNodes() {
-		LOGE.Println("Failed getTrackersTestThreeNodes")
-	}
+	//LOGE.Println("getTrackersTestThreeNodes")
+	//if !getTrackersTestThreeNodes() {
+	//	LOGE.Println("Failed getTrackersTestThreeNodes")
+	//}
 
 	//LOGE.Println("createEntryTestOneNode")
 	//if !createEntryTestOneNode() {
 	//	LOGE.Println("Failed createEntryTestOneNode")
 	//}
 
-	//LOGE.Println("createEntryTestThreeNodes")
-	//if !createEntryTestThreeNodes() {
-	//	LOGE.Println("Failed createEntryTestThreeNodes")
-	//}
+	LOGE.Println("createEntryTestThreeNodes")
+	if !createEntryTestThreeNodes() {
+		LOGE.Println("Failed createEntryTestThreeNodes")
+	}
 
 	//LOGE.Println("testCluster one node")
 	//if !testCluster(1) {
 	//	LOGE.Println("Failed testCluster one node")
 	//}
 
-	//LOGE.Println("testCluster three nodes")
-	//if !testCluster(3) {
-	//	LOGE.Println("Failed testCluster three nodes")
-	//}
+	LOGE.Println("testCluster three nodes")
+	if !testCluster(3) {
+		LOGE.Println("Failed testCluster three nodes")
+	}
+
+	LOGE.Println("testDualing")
+	if !testDualing(3) {
+		LOGE.Println("Failed testDualing")
+	}
 
 	//LOGE.Println("testClosed")
 	//if !testClosed() {
