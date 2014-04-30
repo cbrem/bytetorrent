@@ -1,0 +1,46 @@
+* Current TODOs:
+    - change size in torrent to an int64?
+    - TODO: only being able to create a torrent with a given ID once is fairly fragile...if we somehow forget that we created the torrent, our guarantees break... and what if we do create on the tracker, but the client doesn't find out...would it be blocked from ever creating a torrent with the name it wants to?
+    - right now, self-report doesn't work...and it may never work...
+    but clients could at least keep their internal state correct when
+    they notice that they don't have something
+    - definite use of exponential backoff! when A is sending to B, if B
+    does not accept, A should timeout w/ exponential backoff
+    - self-report might not be enough...what if one client finds
+    out that another is malicious, and is sending bad chunks?
+    it needs to be able to report the bad client
+    - current tests are a bit fragile...they just sleep for how long we think it will take to download
+    - download chunks in parallel! And then ensure that files are okay with this...
+    - test: client offers file, then we remove file
+    - Logging for crash recovery?
+    - test: client LocalFileListener:
+        * check actually informed when things happen
+
+* Current bugs:
+    NONE
+
+* Resolved TODOs:
+    - Currently just hashing the whole file. Should we hash each chunk instead? i think we need to in the end...because this enables clients to start seeding chunks before they have the whole file
+    - store whole torrent on tracker upon creation. what's this good for? it addresses the following situation:
+        * alice creates a torrent for game_of_thrones.mp4, and registers it
+        * eve creates a copy of this torrent with different per-chunk hashes that match the chunks in virus.exe, and offers virus.exe along with this new torrent
+        * bob gets some of his chunks from eve, and only realizes that they're corrupted when he gets the whole file and notices that it doesn't match the whole file hash
+        * Solution! Let clients chech when they get a torrent that it actually is a torrent that was created on the tracker.
+    - note that, if we have a torrent for a chunkID that another client is requesting, we know *exactly* which torrent that client used to request the chunk...because ChunkIDs contain torrent IDs, and torrentIDs are uniquely tied to torrents
+
+* Resolved bugs:
+    - when a client re-adds...does it set them back to 0 chunks?
+    - on attempted download: "Could not download data file: No peers responded with chunk"...solved! i just hadn't offered on some clients
+    - on DOWNLOAD: "Added file", then nothing
+        * seems to get exactly one chunk, but then hangs
+        * hangs on both > chunksize and < chunksize sized files
+        * "download 3" is running, but not "download 4". this means it's
+        definitely a problem with the channels. Could it somehow be
+        deadlock?
+        * nope! just a nil channel
+    - client sometimes gets blocked on CREATE (possibly when other nodes are trying to GetChunk from it)
+        * maybe it's blocked on the send, because the client it's sending
+        to became unresponsive...by the way, that's another thing to watch
+        out for
+        * maybe it's blocking because it's asking itself for the chunk
+        * probably caused by client runner blocking in response to nil download channel
