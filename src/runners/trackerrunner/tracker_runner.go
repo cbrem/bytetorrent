@@ -33,12 +33,24 @@ func main() {
 	}
 
 	// Start tracker on given hostport.
-	if _, err := tracker.NewTrackerServer(master, numNodes, port, nodeID); err != nil {
+	if t, err := tracker.NewTrackerServer(master, numNodes, port, nodeID); err != nil {
 		fmt.Println("Failed to start tracker", err)
 	} else {
 		fmt.Println("Started tracker with hostPort =", port)
-	}
 
-	// Block forever.
-	select {}
+		// Continually get a number of seconds to stall from stdin,
+		// and instruct the tracker to stall for that many seconds.
+		for {
+			var stallSeconds int
+			if n, _ := fmt.Scanln(&stallSeconds); n != 0 {
+				t.DebugStall(stallSeconds)
+
+				// Note that a stall time of 0 seconds will cause the tracker
+				// to close. In this case, the runner will exit as well.
+				if stallSeconds == 0 {
+					return
+				}
+			}
+		}
+	}
 }

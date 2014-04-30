@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
+	"io"
 	"net"
 	"net/rpc"
 	"os"
@@ -19,6 +21,7 @@ import (
 type trackerTester struct {
 	cmd *exec.Cmd
 	srv *rpc.Client
+	in io.WriteCloser
 }
 
 type testFunc struct {
@@ -48,6 +51,7 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 	go func () {
 		// Start the master server
 		masterCmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(basePort), strconv.Itoa(numNodes), strconv.Itoa(0))
+		in, err := masterCmd.StdinPipe()
 
 		masterCmd.Start()
 		srv, err := rpc.DialHTTP("tcp", master)
@@ -56,7 +60,8 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 		}
 		doneChan <- &trackerTester{
 			cmd: masterCmd,
-			srv: srv}
+			srv: srv,
+			in: in}
 	} ()
 
 	// Spawn the non-master trackers in the cluster
@@ -66,6 +71,7 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 			LOGE.Println(port)
 			trackcmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(port),
 					strconv.Itoa(numNodes), strconv.Itoa(id), master)
+			in, err := trackcmd.StdinPipe()
 
 			trackcmd.Start()
 			srv, err := rpc.DialHTTP("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
@@ -74,7 +80,8 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 			}
 			doneChan <- &trackerTester{
 				cmd: trackcmd,
-				srv: srv}
+				srv: srv,
+				in: in}
 		} (i)
 	}
 
@@ -86,6 +93,13 @@ func createCluster(numNodes int) ([](*trackerTester), error) {
 	LOGE.Println("Created Cluster")
 
 	return cluster, nil
+}
+
+func closeCluster(cluster [](*trackerTester)) {
+	for _, tracker := range cluster {
+		tracker.in.Close()
+		tracker.cmd.Process.Kill()
+	}
 }
 
 func createTracker(master string, numNodes, port, nodeID int) (*trackerTester, error) {
@@ -158,7 +172,7 @@ func newTorrentInfo(t *trackerTester, trackersGood bool, numChunks int) (torrent
 	if trackersGood {
 		trackers, err := t.GetTrackers()
 		if err != nil || trackers.Status != trackerproto.OK {
-			LOGE.Println("Get Trackers: Status not OK")
+			LOGE.Println("Get Trackers: Status not OK", err)
 			return torrentproto.Torrent{}, errors.New("Get Trackers failed")
 		}
 
@@ -216,6 +230,7 @@ func getTrackersTestThreeNodes() bool {
 	if err != nil {
 		LOGE.Println("Error creating cluster")
 		LOGE.Println(err.Error())
+		closeCluster(cluster)
 		return false
 	}
 
@@ -223,16 +238,20 @@ func getTrackersTestThreeNodes() bool {
 	trackers, err := cluster[0].GetTrackers()
 	if err != nil {
 		LOGE.Println("Error getting trackers")
+		closeCluster(cluster)
 		return false
 	}
 	if trackers.Status != trackerproto.OK {
 		LOGE.Println("Get Trackers: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 	LOGE.Println("Trackers Found:")
 	for _, v := range trackers.HostPorts {
 		LOGE.Println(v)
 	}
+
+	closeCluster(cluster)
 	return true
 }
 
@@ -283,12 +302,14 @@ func createEntryTestThreeNodes() bool {
 	cluster, err := createCluster(3)
 	if err != nil {
 		LOGE.Println("Error creating cluster")
+		closeCluster(cluster)
 		return false
 	}
 
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -296,6 +317,7 @@ func createEntryTestThreeNodes() bool {
 	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -303,6 +325,7 @@ func createEntryTestThreeNodes() bool {
 	reply, err = cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.InvalidID {
 		LOGE.Println("Create Entry: Status not InvalidID")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -311,6 +334,7 @@ func createEntryTestThreeNodes() bool {
 	reply, err = cluster[1].CreateEntry(torrent)
 	if reply.Status != trackerproto.InvalidID {
 		LOGE.Println("Create Entry: Status not InvalidID")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -318,13 +342,17 @@ func createEntryTestThreeNodes() bool {
 	badtorrent, err := newTorrentInfo(cluster[0], false, 5)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 	reply, err = cluster[0].CreateEntry(badtorrent)
 	if reply.Status != trackerproto.InvalidTrackers {
 		LOGE.Println("Create Entry: Status not InvalidTrackers")
+		closeCluster(cluster)
 		return false
 	}
+
+	closeCluster(cluster)
 	return true
 }
 
@@ -335,6 +363,7 @@ func testCluster(numNodes int) bool {
 	cluster, err := createCluster(numNodes)
 	if err != nil {
 		LOGE.Println("Error creating tracker")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -342,6 +371,7 @@ func testCluster(numNodes int) bool {
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -350,6 +380,7 @@ func testCluster(numNodes int) bool {
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
 		LOGE.Println(strconv.Itoa(int(reply.Status)))
+		closeCluster(cluster)
 		return false
 	}
 
@@ -358,10 +389,12 @@ func testCluster(numNodes int) bool {
 	reply, err = cluster[0].ConfirmChunk(chunk, "banana")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -369,10 +402,12 @@ func testCluster(numNodes int) bool {
 	reply, err = cluster[0].ConfirmChunk(chunk, "apple")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -380,10 +415,12 @@ func testCluster(numNodes int) bool {
 	reply, err = cluster[0].ReportMissing(chunk, "banana")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -391,22 +428,27 @@ func testCluster(numNodes int) bool {
 	reqReply, err := cluster[0].RequestChunk(chunk)
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reqReply.Status != trackerproto.OK {
 		LOGE.Println("Request Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 	// Should just contain "apple"
 	if len(reqReply.Peers) != 1 {
 		LOGE.Println("Wrong number of peers")
+		closeCluster(cluster)
 		return false
 	} else {
 		if reqReply.Peers[0] != "apple" {
 			LOGE.Println("Wrong Peers: " + reqReply.Peers[0])
+			closeCluster(cluster)
 			return false
 		} else {
 			LOGE.Println("Correct Peers: " + reqReply.Peers[0])
+			closeCluster(cluster)
 			return true
 		}
 	}
@@ -458,6 +500,7 @@ func testStress(total int) bool {
 
 		if err0 != nil || err2 != nil {
 			LOGE.Println("Error getting operation.")
+			closeCluster(cluster)
 			return false
 		}
 		if reply0.Status == trackerproto.OutOfDate {
@@ -471,6 +514,7 @@ func testStress(total int) bool {
 		seqNum++
 	}
 	LOGE.Println("SeqNum: ", seqNum)
+	closeCluster(cluster)
 	return matching
 }
 
@@ -523,6 +567,7 @@ func testDualing(total int) bool {
 
 		if err0 != nil || err2 != nil {
 			LOGE.Println("Error getting operation.")
+			closeCluster(cluster)
 			return false
 		}
 		if reply0.Status == trackerproto.OutOfDate {
@@ -536,6 +581,7 @@ func testDualing(total int) bool {
 		seqNum++
 	}
 	LOGE.Println("SeqNum: ", seqNum)
+	closeCluster(cluster)
 	return matching
 }
 
@@ -544,22 +590,29 @@ func testClosed() bool {
 	cluster, err := createCluster(3)
 	if err != nil {
 		LOGE.Println("Could not create cluster")
+		closeCluster(cluster)
 		return false
 	}
 
 	// Close one of the nodes
-	//cluster[2].tracker.DebugStall(0)
+	if _, err := fmt.Fprintln(cluster[2].in, "0"); err != nil {
+		LOGE.Println("Could not close node")
+		closeCluster(cluster)
+		return false
+	}
 
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 
 	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -567,13 +620,17 @@ func testClosed() bool {
 	reply, err = cluster[0].ConfirmChunk(chunk, "banana")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
+	LOGE.Println("Passed testClosed")
+	closeCluster(cluster)
 	return true
 }
 
@@ -582,12 +639,21 @@ func testClosedTwo() bool {
 	cluster, err := createCluster(3)
 	if err != nil {
 		LOGE.Println("Colud not create cluster")
+		closeCluster(cluster)
 		return false
 	}
 
 	// Close two nodes
-	//cluster[1].tracker.DebugStall(0)
-	//cluster[2].tracker.DebugStall(0)
+	if _, err := fmt.Fprintln(cluster[1].in, "0"); err != nil {
+		LOGE.Println("Could not close node 1")
+		closeCluster(cluster)
+		return false
+	}
+	if _, err := fmt.Fprintln(cluster[1].in, "0"); err != nil {
+		LOGE.Println("Could not close node 2")
+		closeCluster(cluster)
+		return false
+	}
 
 	boolChan := make(chan bool)
 	time.AfterFunc(time.Second * time.Duration(15), func () { boolChan <- true })
@@ -608,7 +674,12 @@ func testClosedTwo() bool {
 		boolChan <- false
 	} (cluster)
 
-	return <-boolChan
+	passed := <-boolChan
+	if passed {
+		LOGE.Println("Passed testClosedTwo")
+	}
+	closeCluster(cluster)
+	return passed
 }
 
 // Stall one node, then do stuff
@@ -617,21 +688,29 @@ func testStalled() bool {
 	cluster, err := createCluster(3)
 	if err != nil {
 		LOGE.Println("Could not create cluster")
+		closeCluster(cluster)
+		return false
 	}
 
 	// Stall for 15 seconds
-	//cluster[2].tracker.DebugStall(15)
+	if _, err := fmt.Fprintln(cluster[2].in, "15"); err != nil {
+		LOGE.Println("Could not stall node")
+		closeCluster(cluster)
+		return false
+	}
 
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
 	if err != nil {
 		LOGE.Println("Could not create torrent")
+		closeCluster(cluster)
 		return false
 	}
 
 	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -639,10 +718,12 @@ func testStalled() bool {
 	reply, err = cluster[0].ConfirmChunk(chunk, "banana")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -650,10 +731,12 @@ func testStalled() bool {
 	reply, err = cluster[2].ConfirmChunk(chunk, "apple")
 	if err != nil {
 		LOGE.Println("Error confirming chunk")
+		closeCluster(cluster)
 		return false
 	}
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Confirm Chunk: Status not OK")
+		closeCluster(cluster)
 		return false
 	}
 
@@ -666,6 +749,7 @@ func testStalled() bool {
 
 		if err0 != nil || err2 != nil {
 			LOGE.Println("Error getting operation.")
+			closeCluster(cluster)
 			return false
 		}
 		if reply0.Status == trackerproto.OutOfDate {
@@ -677,6 +761,10 @@ func testStalled() bool {
 		matching = matching && valsEq && (reply0.Status == reply2.Status)
 	}
 
+	if matching {
+		LOGE.Println("Passed testStalled")
+	}
+	closeCluster(cluster)
 	return matching
 }
 
@@ -711,10 +799,10 @@ func main() {
 	//	LOGE.Println("Failed testCluster three nodes")
 	//}
 
-	//LOGE.Println("----------- testStress")
-	//if !testStress(100) {
-	//	LOGE.Println("Failed testStress")
-	//}
+	LOGE.Println("----------- testStress")
+	if !testStress(100) {
+		LOGE.Println("Failed testStress")
+	}
 
 	LOGE.Println("----------- testDualing")
 	if !testDualing(30) {
