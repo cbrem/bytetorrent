@@ -51,14 +51,14 @@ sleep 2
 CLIENT1_PORT=$(((RANDOM % 10000) + 10000))
 PIPE1=/tmp/tmp1
 mkfifo $PIPE1
-${CLIENT} "localhost:${CLIENT1_PORT}" "localhost:${TRACKER_PORT}" < $PIPE1 &
+${CLIENT} no "localhost:${CLIENT1_PORT}" "localhost:${TRACKER_PORT}" < $PIPE1 &
 sleep 2
 
 # Start client2.
 CLIENT2_PORT=$(((RANDOM % 10000) + 10000))
 PIPE2=/tmp/tmp2
 mkfifo $PIPE2
-${CLIENT} "localhost:${CLIENT2_PORT}" "localhost:${TRACKER_PORT}" < $PIPE2 &
+${CLIENT} no "localhost:${CLIENT2_PORT}" "localhost:${TRACKER_PORT}" < $PIPE2 &
 sleep 2
 
 # Create, register, and upload a torrent on client1.

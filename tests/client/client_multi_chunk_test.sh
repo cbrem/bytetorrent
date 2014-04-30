@@ -57,14 +57,14 @@ sleep 2
 CLIENT1_PORT=$(((RANDOM % 10000) + 10000))
 PIPE1=/tmp/tmp1
 mkfifo $PIPE1
-${CLIENT} "localhost:${CLIENT1_PORT}" "localhost:${TRACKER_PORT}" < $PIPE1 &
+${CLIENT} no "localhost:${CLIENT1_PORT}" "localhost:${TRACKER_PORT}" < $PIPE1 &
 sleep 2
 
 # Start client2.
 CLIENT2_PORT=$(((RANDOM % 10000) + 10000))
 PIPE2=/tmp/tmp2
 mkfifo $PIPE2
-${CLIENT} "localhost:${CLIENT2_PORT}" "localhost:${TRACKER_PORT}" < $PIPE2 &
+${CLIENT} no "localhost:${CLIENT2_PORT}" "localhost:${TRACKER_PORT}" < $PIPE2 &
 sleep 2
 
 # Create, register, and upload a torrent on client1.
@@ -79,7 +79,7 @@ sleep 2
 # Download the file from client2.
 DOWNLOADED_FILE_PATH=downloaded_music.mp3
 echo -e "DOWNLOAD ${DOWNLOADED_FILE_PATH} ${TORRENT_NAME}.torrent" >> $PIPE2
-sleep 75
+sleep 10
 
 # Exit client.
 echo -e "EXIT" >> $PIPE1

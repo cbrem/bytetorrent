@@ -4,8 +4,10 @@ import (
     "encoding/json"
     "fmt"
     "io/ioutil"
+    "math/rand"
     "os"
     "strings"
+    "time"
 
     "torrent"
     "torrent/torrentproto"
@@ -21,10 +23,10 @@ const (
 var (
     USAGE string = strings.Join([]string{
         "Usage:",
-        "\t<program_name> <client host:port> <tracker 0 host:port> ... <tracker n-1 host:port>",
+        "\t<program_name> <pretty print> <client host:port> <tracker 0 host:port> ... <tracker n-1 host:port>",
         ""}, "\n")
     COMMANDS string = strings.Join([]string{
-        "Command:",
+        "Commands:",
         "\tCREATE <file_path> <name>",
         "\tREGISTER <torrent_path>",
         "\tOFFER <file_path> <torrent_path>",
@@ -32,6 +34,22 @@ var (
         "\tREAD <torrent_path>",
         "\tEXIT",
         ""}, "\n")
+    WELCOME string = strings.Join([]string{
+        "",
+        "\t\tWelcome to ByteTorrent!",
+        "",
+        "\t%s",
+        "",
+        "\t\tBilly Wood, Connor Brem",
+        ""}, "\n")
+    TAGLINES []string = []string{
+        "If you can't trust the peers, why trust the protocol?",
+        "For when BitTorrent isn't sketchy enough!",
+        "The security is just as questionable as the legality!",
+        "'I love ByteTorrent' - William (Bill) Gates",
+        "For when BitTorrent isn't big enough to hold all the bits",
+        "The world's 723rd most popular P2P system"}
+
 )
 
 // A listener which updates the view when the Client changes local files.
@@ -58,7 +76,7 @@ func changeToString(change *clientproto.LocalFileChange) string {
 }
 
 // processInputs gets inputs from users and acts on them.
-func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.LocalFile, trackerNodes []torrentproto.TrackerNode) {
+func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.LocalFile, trackerNodes []torrentproto.TrackerNode, prettyPrint bool) {
     var cmd string
     var args [3]string
     for {
@@ -139,9 +157,9 @@ func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.
         case "EXIT":
             // Save the client's state to a file.
             if localFilesBytes, err := json.Marshal(localFiles); err != nil {
-                fmt.Println("Could not save client state:", err)
+                //fmt.Println("Could not save client state:", err)
             } else if err := ioutil.WriteFile(SAVE_PATH, localFilesBytes, MODE); err != nil {
-                fmt.Println("Could not save client state:", err)
+                //fmt.Println("Could not save client state:", err)
             } else {
                 fmt.Println("Successfully saved client state")
             }
@@ -152,7 +170,9 @@ func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.
 
         default:
             // Invalid command. Print command information.
-            //fmt.Println(COMMANDS)
+            if prettyPrint {
+                fmt.Println(COMMANDS)
+            }
         }
     }
 }
@@ -164,10 +184,10 @@ func main() {
     // Load saved localFiles, if they exist.
     var localFiles map[torrentproto.ID]*clientproto.LocalFile
     if savedBytes, err := ioutil.ReadFile(SAVE_PATH); err != nil {
-        fmt.Println("Could not find saved state:", err)
+        //fmt.Println("Could not find saved state:", err)
         localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
     } else if err := json.Unmarshal(savedBytes, localFiles); err != nil {
-        fmt.Println("Could not read saved state:", err)
+        //fmt.Println("Could not read saved state:", err)
         localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
     }
 
@@ -175,13 +195,14 @@ func main() {
     // First hostport is for Client, and remainder are for Trackers.
     //
     // TODO: make sure that the indices in the os.Args are correct
-    if len(os.Args) < 3 {
+    if len(os.Args) < 4 {
         fmt.Println(USAGE)
         return
     }
-    clientHostPort := os.Args[1]
+    prettyPrint := (os.Args[1] == "yes")
+    clientHostPort := os.Args[2]
     trackerNodes := make([]torrentproto.TrackerNode, 0)
-    for _, trackerHostPort := range os.Args[2:] {
+    for _, trackerHostPort := range os.Args[3:] {
         trackerNodes = append(trackerNodes, torrentproto.TrackerNode{HostPort: trackerHostPort})
     }
 
@@ -190,8 +211,15 @@ func main() {
     if c, err := client.NewClient(localFiles, lfl, clientHostPort); err != nil {
         fmt.Println("Could not start client:", err)
     } else {
+        // Print welcome message.
+        if prettyPrint {
+            r := rand.New(rand.NewSource(time.Now().UnixNano()))
+            tagline := TAGLINES[r.Int() % len(TAGLINES)]
+            fmt.Println(fmt.Sprintf(WELCOME, tagline))
+            fmt.Println(COMMANDS)
+        }
+
         // Accept commands from stdin until the user exits.
-        fmt.Println("Started client with (clientHostPort, trackerHostPorts) = (", clientHostPort, ", [", strings.Join(os.Args[2:], " "), "] )")
-        processInputs(c, localFiles, trackerNodes)
+        processInputs(c, localFiles, trackerNodes, prettyPrint)
     }
 }
