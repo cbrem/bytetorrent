@@ -801,9 +801,10 @@ func (t *trackerServer) sendMess(id int, mess *PaxosBroadcast) {
 }
 
 func (t *trackerServer) paxosHandler() {
-	initPaxos := make(chan struct{}, 1)
+	initPaxos := make(chan struct{}, 3)
 	prepareReply := make(chan *PaxosReply)
 	acceptReply := make(chan *PaxosReply)
+	comReply := make(chan *PaxosReply, t.numNodes)
 	prepPhase := false
 	accPhase := false
 	inPaxos := false
@@ -812,6 +813,7 @@ func (t *trackerServer) paxosHandler() {
 	accN := 0
 	accV := trackerproto.Operation{OpType: trackerproto.None}
 	oks := 0
+	var T *time.Timer
 	for {
 		select {
 		case <-t.dbclose:
@@ -825,17 +827,19 @@ func (t *trackerServer) paxosHandler() {
 			// then keep going
 			<-t.dbcontinue
 		case <-initPaxos:
-			//fmt.Println("Starting Paxos")
+			// Initialize values
 			inPaxos = true
 			accV = trackerproto.Operation{OpType: trackerproto.None}
 			t.myN = (t.highestN - (t.highestN % t.numNodes)) + (t.numNodes + t.nodeID)
-			backoff = 1
 			responses = 0
 			oks = 0
 			prepPhase = true
 			accPhase = false
-			//fmt.Println("Starting Paxos")
-			//fmt.Println(strconv.Itoa(int(accV.OpType)))
+
+			// Set a timer before restarting paxos
+			backoff = 2 * (backoff + t.nodeID)
+			wait := time.Second * time.Duration(backoff)
+			T = time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
 			for id := 0; id < t.numNodes; id++ {
 				mess := &PaxosBroadcast{
 					MyN:    t.myN,
@@ -871,6 +875,7 @@ func (t *trackerServer) paxosHandler() {
 				}
 
 				if oks > (t.numNodes / 2) {
+					T.Stop()
 					//fmt.Println(strconv.Itoa(int(accV.OpType)))
 					if accV.OpType == trackerproto.None {
 						// Check that there's something in the list
@@ -884,12 +889,14 @@ func (t *trackerServer) paxosHandler() {
 
 					if accV.OpType != trackerproto.None {
 						// Broadcast the accept message
-						// First increment the myN,
-						// So that replies to previous messages will be ignored
 						responses = 0
 						oks = 0
 						prepPhase = false
 						accPhase = true
+
+						// Reset timer
+						wait := time.Second * time.Duration(backoff)
+						T = time.AfterFunc(wait, func () { initPaxos <- struct{}{} })
 						for id := 0; id < t.numNodes; id++ {
 							mess := &PaxosBroadcast{
 								MyN:    t.myN,
@@ -899,13 +906,8 @@ func (t *trackerServer) paxosHandler() {
 								Value:  accV}
 							go t.sendMess(id, mess)
 						}
+
 					}
-				} else {
-					// Did not get quorum,
-					// So wait (with exponential backoff) and try again
-					backoff = 2 * backoff
-					wait := time.Second * time.Duration(backoff*REGISTER_PERIOD)
-					time.AfterFunc(wait, func() { initPaxos <- struct{}{} })
 				}
 			}
 		case acc := <-acceptReply:
@@ -918,43 +920,35 @@ func (t *trackerServer) paxosHandler() {
 				}
 
 				if oks > (t.numNodes / 2) {
+					T.Stop()
 					accPhase = false
-					seqNum := t.seqNum
-					comReply := make(chan *PaxosReply, t.numNodes)
+					backoff = 1
+					comReply = make(chan *PaxosReply, t.numNodes)
 					for id := 0; id < t.numNodes; id++ {
 						mess := &PaxosBroadcast{
 							MyN:    t.myN,
 							Type:   PaxosCommit,
 							Reply:  comReply,
-							SeqNum: seqNum,
+							SeqNum: t.seqNum,
 							Value:  accV}
 						go t.sendMess(id, mess)
 					}
-					// This line says:
-					//  "wait until this tracker has finished commiting before continuing"
-					ready := false
-					for !ready {
-						rep := <-comReply
-						if rep.Status == trackerproto.OK {
-							ready = true
-						}
-					}
-
-					t.pendingMut.Lock()
-					if t.pendingOps.Len() > 0 {
-						// TODO
-						// Skip the prepare phase
-						initPaxos <- struct{}{}
-					} else {
-						accV = trackerproto.Operation{OpType: trackerproto.None}
-						inPaxos = false
-					}
-					t.pendingMut.Unlock()
-				} else {
-					backoff = 2 * backoff
-					wait := time.Second * time.Duration(backoff*REGISTER_PERIOD)
-					time.AfterFunc(wait, func() { initPaxos <- struct{}{} })
 				}
+			}
+		case com := <-comReply:
+			// This line says:
+			//  "wait until this tracker has committed before continuing"
+			if com.Status == trackerproto.OK {
+				t.pendingMut.Lock()
+				if t.pendingOps.Len() > 0 {
+					// TODO
+					// Skip the prepare phase
+					initPaxos <- struct{}{}
+				} else {
+					accV = trackerproto.Operation{OpType: trackerproto.None}
+					inPaxos = false
+				}
+				t.pendingMut.Unlock()
 			}
 		}
 	}

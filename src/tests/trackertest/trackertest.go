@@ -412,19 +412,131 @@ func testCluster(numNodes int) bool {
 	}
 }
 
-// Test with dualing leaders
-func testDualing() bool {
+func testStress(total int) bool {
 	cluster, _ := createCluster(3)
 
 	LOGE.Println("Creating Torrent")
 	torrent, _ := newTorrentInfo(cluster[0], true, 3)
-	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
+	cluster[0].CreateEntry(torrent)
 
-	for i := 0; i < 2; i++ {
+	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
+	doneChan := make(chan struct {})
+
+	LOGE.Println("Sending Messages")
+	// Have two nodes make a large number of confirms and reports
+	for i := 0; i < total; i++ {
 		go func () {
-			
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			conf, err := cluster[0].ConfirmChunk(chunk, strconv.Itoa(r.Int()))
+			if err != nil {
+				LOGE.Println(err.Error())
+			}
+			if conf.Status != trackerproto.OK {
+				LOGE.Println("Confirm Chunk: Status not OK")
+			}
+
+			doneChan <- struct{}{}
 		} ()
 	}
+	LOGE.Println("Waiting for things to finish")
+	fin := 0
+	for fin < total {
+		<-doneChan
+		fin++
+		if fin % 10 == 0 {
+			LOGE.Println("Finished: ", fin)
+		}
+	}
+	LOGE.Println("Everything in")
+
+	seqNum := 0
+	ok := true
+	matching := true
+	for matching && ok {
+		reply0, err0 := cluster[0].GetOp(seqNum)
+		reply2, err2 := cluster[1].GetOp(seqNum)
+
+		if err0 != nil || err2 != nil {
+			LOGE.Println("Error getting operation.")
+			return false
+		}
+		if reply0.Status == trackerproto.OutOfDate {
+			ok = false
+		}
+		val0 := reply0.Value
+		val2 := reply2.Value
+		valsEq := val0.OpType == val2.OpType && val0.Chunk == val2.Chunk && val0.ClientAddr == val2.ClientAddr
+		matching = matching && valsEq && (reply0.Status == reply2.Status)
+
+		seqNum++
+	}
+	LOGE.Println("SeqNum: ", seqNum)
+	return matching
+}
+
+// Test with dualing leaders
+func testDualing(total int) bool {
+	cluster, _ := createCluster(3)
+
+	LOGE.Println("Creating Torrent")
+	torrent, _ := newTorrentInfo(cluster[0], true, 3)
+	cluster[0].CreateEntry(torrent)
+
+	chunk := torrentproto.ChunkID{ID: torrent.ID, ChunkNum: 0}
+	doneChan := make(chan int)
+
+	LOGE.Println("Sending Messages")
+	// Have two nodes make a large number of confirms and reports
+	for i := 0; i < total; i++ {
+		go func (id int) {
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			conf, err := cluster[id].ConfirmChunk(chunk, strconv.Itoa(r.Int()))
+			if err != nil {
+				LOGE.Println(err.Error())
+			}
+			if conf.Status != trackerproto.OK {
+				LOGE.Println("Confirm Chunk: Status not OK")
+			}
+
+			doneChan <- id
+		} (i % 2)
+	}
+	LOGE.Println("Waiting for things to finish")
+	fin := make([]int, 2)
+	fin[0] = 0
+	fin[1] = 0
+	for fin[0] + fin[1] < total {
+		id := <-doneChan
+		fin[id]++
+		if fin[0] + fin[1] % 10 == 0 {
+			LOGE.Println("Finished: ", fin[0], fin[1])
+		}
+	}
+	LOGE.Println("Everything in")
+
+	seqNum := 0
+	ok := true
+	matching := true
+	for matching && ok {
+		reply0, err0 := cluster[0].GetOp(seqNum)
+		reply2, err2 := cluster[1].GetOp(seqNum)
+
+		if err0 != nil || err2 != nil {
+			LOGE.Println("Error getting operation.")
+			return false
+		}
+		if reply0.Status == trackerproto.OutOfDate {
+			ok = false
+		}
+		val0 := reply0.Value
+		val2 := reply2.Value
+		valsEq := val0.OpType == val2.OpType && val0.Chunk == val2.Chunk && val0.ClientAddr == val2.ClientAddr
+		matching = matching && valsEq && (reply0.Status == reply2.Status)
+
+		seqNum++
+	}
+	LOGE.Println("SeqNum: ", seqNum)
+	return matching
 }
 
 // Tests that a 3 node cluster can still operate when one node is closed.
@@ -569,52 +681,57 @@ func testStalled() bool {
 }
 
 func main() {
-	//LOGE.Println("getTrackersTestOneNode")
+	//LOGE.Println("----------- getTrackersTestOneNode")
 	//if !getTrackersTestOneNode() {
 	//	LOGE.Println("Failed getTrackersTestOneNode")
 	//}
 
-	//LOGE.Println("getTrackersTestThreeNodes")
+	//LOGE.Println("----------- getTrackersTestThreeNodes")
 	//if !getTrackersTestThreeNodes() {
 	//	LOGE.Println("Failed getTrackersTestThreeNodes")
 	//}
 
-	//LOGE.Println("createEntryTestOneNode")
+	//LOGE.Println("----------- createEntryTestOneNode")
 	//if !createEntryTestOneNode() {
 	//	LOGE.Println("Failed createEntryTestOneNode")
 	//}
 
-	LOGE.Println("createEntryTestThreeNodes")
-	if !createEntryTestThreeNodes() {
-		LOGE.Println("Failed createEntryTestThreeNodes")
-	}
+	//LOGE.Println("----------- createEntryTestThreeNodes")
+	//if !createEntryTestThreeNodes() {
+	//	LOGE.Println("Failed createEntryTestThreeNodes")
+	//}
 
-	//LOGE.Println("testCluster one node")
+	//LOGE.Println("----------- testCluster one node")
 	//if !testCluster(1) {
 	//	LOGE.Println("Failed testCluster one node")
 	//}
 
-	LOGE.Println("testCluster three nodes")
-	if !testCluster(3) {
-		LOGE.Println("Failed testCluster three nodes")
-	}
+	//LOGE.Println("----------- testCluster three nodes")
+	//if !testCluster(3) {
+	//	LOGE.Println("Failed testCluster three nodes")
+	//}
 
-	LOGE.Println("testDualing")
-	if !testDualing(3) {
+	//LOGE.Println("----------- testStress")
+	//if !testStress(100) {
+	//	LOGE.Println("Failed testStress")
+	//}
+
+	LOGE.Println("----------- testDualing")
+	if !testDualing(30) {
 		LOGE.Println("Failed testDualing")
 	}
 
-	//LOGE.Println("testClosed")
+	//LOGE.Println("----------- testClosed")
 	//if !testClosed() {
 	//	LOGE.Println("Failed testClosed")
 	//}
 
-	//LOGE.Println("testClosedTwo")
+	//LOGE.Println("----------- testClosedTwo")
 	//if !testClosedTwo() {
 	//	LOGE.Println("Failed testClosedTwo")
 	//}
 
-	//LOGE.Println("testStalled")
+	//LOGE.Println("----------- testStalled")
 	//if !testStalled() {
 	//	LOGE.Println("Failed testStalled")
 	//}
