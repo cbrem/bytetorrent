@@ -1,1 +1,25 @@
-Things to bring up when we present:
+Demo outline:
+    1. End-to-end demo:
+        * start a bunch of clients and a tracker cluster
+        * give all clients but one a file
+        * get the file on the last client
+        * possibly log to show where chunks are coming from
+    2. Demonstrate test/failure handing:
+        * Demonstrate tracker failure/recovery
+        * Demonstrate local file removal
+        * Demonstrate malicious node handling
+    3. Discuss design:
+        * Name-by-hash
+        * Hashing to check chunk validity
+        * Clients may go on/off-line as they please - other clients will not report them
+        * RPC
+        * Paxos details: 
+            - Exponential backoff for dueling leaders
+            - Establish cluster with master-slave strategy (from storage server)
+            - During Paxos, if a node is out-of-date, it will ping other nodes to catch-up
+            - Two main goroutines:
+                + eventHandler
+                    * Receives / deals with RPCs
+                + paxosHandler
+                    * maintains a list of pending ops
+                    * broadcasts the prepare/accept/commit messages

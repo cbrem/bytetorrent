@@ -15,6 +15,11 @@
     - Logging for crash recovery?
     - test: client LocalFileListener:
         * check actually informed when things happen
+    - update tracker tests:
+        * trackertest should be able to send stuff to tracker_runner's stdin
+        * tracker_runner should be able to call tracker_impl's DebugStall method with either:
+            - 0 for close
+            - n > 0 to stall
 
 * Current bugs:
     NONE
