@@ -23,10 +23,11 @@ package tracker
 
 import (
 	"container/list"
-	//"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -36,6 +37,8 @@ import (
 	"torrent/torrentproto"
 	"tracker/trackerproto"
 )
+
+var LOGE = log.New(os.Stderr, "", log.Lshortfile|log.Lmicroseconds)
 
 // The time between RegisterServer calls from a slave server, in seconds
 const REGISTER_PERIOD = 1
@@ -257,6 +260,8 @@ func NewTrackerServer(masterServerHostPort string, numNodes, port, nodeID int) (
 
 	// Spawn a goroutine to talk to the other Paxos Nodes
 	go t.paxosHandler()
+
+	LOGE.Println("Server Started")
 
 	return t, nil
 }
@@ -646,11 +651,12 @@ func (t *trackerServer) eventHandler() {
 					Peers:  peers}
 			}
 		case gt := <-t.getTrackers:
-			//fmt.Println("EH: GetTrackers")
+			LOGE.Println("EH: GetTrackers")
 			// A client has requested a list of users with a certain chunk
 			hostPorts := make([]string, t.numNodes)
 			for i, node := range t.nodes {
 				hostPorts[i] = node.HostPort
+				LOGE.Println(node.HostPort)
 			}
 			gt.Reply <- &trackerproto.TrackersReply{
 				Status:    trackerproto.OK,

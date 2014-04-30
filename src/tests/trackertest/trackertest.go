@@ -2,11 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"net/rpc"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 	"torrent/torrentproto"
@@ -15,7 +18,6 @@ import (
 )
 
 type trackerTester struct {
-	tracker tracker.Tracker
 	srv     *rpc.Client
 }
 
@@ -27,54 +29,79 @@ type testFunc struct {
 var LOGE = log.New(os.Stderr, "", log.Lshortfile|log.Lmicroseconds)
 
 func createCluster(numNodes int) ([](*trackerTester), error) {
+	if numNodes <= 0 {
+		return nil, errors.New("numNodes <= 0")
+	}
 	basePort := 9091 + 41*(rand.Int() % 300)
 	cluster := make([](*trackerTester), numNodes)
-	doneChan := make(chan (*trackerTester))
+	doneChan := make(chan *trackerTester)
 	master := net.JoinHostPort("localhost", strconv.Itoa(basePort))
+	LOGE.Println(master)
 
-	// Spawn the master tracker
-	go func() {
-		tester, err := createTracker("", numNodes, basePort, 0)
-		if err != nil {
-			LOGE.Println("Could not create master tracker")
-			doneChan <- nil
-		} else {
-			doneChan <- tester
+	gobin := os.Getenv("GOBIN")
+	if gobin == "" {
+		return cluster, errors.New("GOBIN not set")
+	}
+
+	go func () {
+		// Start the master server
+		masterCmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(basePort), strconv.Itoa(numNodes), strconv.Itoa(0))
+		stderr, _ := masterCmd.StdoutPipe()
+
+		masterCmd.Start()
+		srv, err := rpc.DialHTTP("tcp", master)
+		for err != nil {
+			srv, err = rpc.DialHTTP("tcp", master)
+		}
+		doneChan <- &trackerTester{srv: srv}
+
+		for {
+			var out string
+			n, _ := fmt.Fscanln(stderr, &out)
+			if n != 0 {
+				LOGE.Println(out)
+			}
 		}
 	} ()
 
-	// Spawn the rest of the trackers in the ring
+	// Spawn the non-master trackers in the cluster
 	for i := 1; i < numNodes; i++ {
 		go func (id int) {
-			tester, err := createTracker(master, numNodes, basePort+17*id, id)
-			if err != nil {
-				LOGE.Println("Could not create tracker")
-				doneChan <- nil
-			} else {
-				doneChan <- tester
+			port := basePort + 17*id
+			LOGE.Println(port)
+			trackcmd := exec.Command(filepath.Join(gobin, "tracker_runner"), strconv.Itoa(port),
+					strconv.Itoa(numNodes), strconv.Itoa(id), master)
+			stderr, _ := trackcmd.StderrPipe()
+
+			trackcmd.Start()
+			srv, err := rpc.DialHTTP("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
+			for err != nil {
+				srv, err = rpc.DialHTTP("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)))
+			}
+			doneChan <- &trackerTester{srv: srv}
+
+			for {
+				var out string
+				n, _ := fmt.Fscanln(stderr, &out)
+				if n != 0 {
+					LOGE.Println(out)
+				}
 			}
 		} (i)
 	}
 
-	// Now wait for the nodes to respond
-	bad := false
-	i := 0
-	for i < numNodes {
-		cluster[i] = <-doneChan
-		if cluster[i] == nil {
-			bad = true
-		}
-		i++
+	resp := 0
+	for resp < numNodes {
+		cluster[resp] = <-doneChan
+		resp++
 	}
-	if bad {
-		return cluster, errors.New("Could not create cluster")
-	} else {
-		return cluster, nil
-	}
+	LOGE.Println("Created Cluster")
+
+	return cluster, nil
 }
 
 func createTracker(master string, numNodes, port, nodeID int) (*trackerTester, error) {
-	tracker, err := tracker.NewTrackerServer(master, numNodes, port, nodeID)
+	_, err := tracker.NewTrackerServer(master, numNodes, port, nodeID)
 	if err != nil {
 		LOGE.Println(err.Error())
 		return nil, err
@@ -86,7 +113,7 @@ func createTracker(master string, numNodes, port, nodeID int) (*trackerTester, e
 		return nil, err
 	}
 
-	return &trackerTester{tracker: tracker, srv: srv}, nil
+	return &trackerTester{srv: srv}, nil
 }
 
 func (t *trackerTester) GetOp(seqNum int) (*trackerproto.GetReply, error) {
@@ -101,28 +128,28 @@ func (t *trackerTester) ConfirmChunk(chunk torrentproto.ChunkID, hostPort string
 		Chunk: chunk,
 		HostPort: hostPort}
 	reply := &trackerproto.UpdateReply{}
-	err := t.srv.Call("Tracker.ConfirmChunk", args, reply)
+	err := t.srv.Call("RemoteTracker.ConfirmChunk", args, reply)
 	return reply, err
 }
 
 func (t *trackerTester) RequestChunk(chunk torrentproto.ChunkID) (*trackerproto.RequestReply, error) {
 	args := &trackerproto.RequestArgs{Chunk: chunk}
 	reply := &trackerproto.RequestReply{}
-	err := t.srv.Call("Tracker.RequestChunk", args, reply)
+	err := t.srv.Call("RemoteTracker.RequestChunk", args, reply)
 	return reply, err
 }
 
 func (t *trackerTester) CreateEntry(torrent torrentproto.Torrent) (*trackerproto.UpdateReply, error) {
 	args := &trackerproto.CreateArgs{Torrent: torrent}
 	reply := &trackerproto.UpdateReply{}
-	err := t.srv.Call("Tracker.CreateEntry", args, reply)
+	err := t.srv.Call("RemoteTracker.CreateEntry", args, reply)
 	return reply, err
 }
 
 func (t *trackerTester) GetTrackers() (*trackerproto.TrackersReply, error) {
 	args := &trackerproto.TrackersArgs{}
 	reply := &trackerproto.TrackersReply{}
-	err := t.srv.Call("Tracker.GetTrackers", args, reply)
+	err := t.srv.Call("RemoteTracker.GetTrackers", args, reply)
 	return reply, err
 }
 
@@ -131,7 +158,7 @@ func (t *trackerTester) ReportMissing(chunk torrentproto.ChunkID, hostPort strin
 		Chunk: chunk,
 		HostPort: hostPort}
 	reply := &trackerproto.UpdateReply{}
-	err := t.srv.Call("Tracker.ReportMissing", args, reply)
+	err := t.srv.Call("RemoteTracker.ReportMissing", args, reply)
 	return reply, err
 }
 
@@ -177,6 +204,7 @@ func getTrackersTestOneNode() bool {
 		LOGE.Println("Error creating tracker")
 		return false
 	}
+	LOGE.Println("Getting Trackers")
 	trackers, err := tester.GetTrackers()
 	if err != nil {
 		LOGE.Println("Error getting trackers")
@@ -199,9 +227,11 @@ func getTrackersTestThreeNodes() bool {
 	cluster, err := createCluster(3)
 	if err != nil {
 		LOGE.Println("Error creating cluster")
+		LOGE.Println(err.Error())
 		return false
 	}
 
+	LOGE.Println("Getting Trackers")
 	trackers, err := cluster[0].GetTrackers()
 	if err != nil {
 		LOGE.Println("Error getting trackers")
@@ -331,6 +361,7 @@ func testCluster(numNodes int) bool {
 	reply, err := cluster[0].CreateEntry(torrent)
 	if reply.Status != trackerproto.OK {
 		LOGE.Println("Create Entry: Status not OK")
+		LOGE.Println(strconv.Itoa(int(reply.Status)))
 		return false
 	}
 
@@ -402,7 +433,7 @@ func testClosed() bool {
 	}
 
 	// Close one of the nodes
-	cluster[2].tracker.DebugStall(0)
+	//cluster[2].tracker.DebugStall(0)
 
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
@@ -440,8 +471,8 @@ func testClosedTwo() bool {
 	}
 
 	// Close two nodes
-	cluster[1].tracker.DebugStall(0)
-	cluster[2].tracker.DebugStall(0)
+	//cluster[1].tracker.DebugStall(0)
+	//cluster[2].tracker.DebugStall(0)
 
 	boolChan := make(chan bool)
 	time.AfterFunc(time.Second * time.Duration(15), func () { boolChan <- true })
@@ -474,7 +505,7 @@ func testStalled() bool {
 	}
 
 	// Stall for 15 seconds
-	cluster[2].tracker.DebugStall(15)
+	//cluster[2].tracker.DebugStall(15)
 
 	// Now attempt to do something.
 	torrent, err := newTorrentInfo(cluster[0], true, 3)
@@ -535,7 +566,7 @@ func testStalled() bool {
 }
 
 func main() {
-	LOGE.Println("getTrackersTestOneNode")
+	//LOGE.Println("getTrackersTestOneNode")
 	//if !getTrackersTestOneNode() {
 	//	LOGE.Println("Failed getTrackersTestOneNode")
 	//}
@@ -545,37 +576,37 @@ func main() {
 		LOGE.Println("Failed getTrackersTestThreeNodes")
 	}
 
-	LOGE.Println("createEntryTestOneNode")
+	//LOGE.Println("createEntryTestOneNode")
 	//if !createEntryTestOneNode() {
 	//	LOGE.Println("Failed createEntryTestOneNode")
 	//}
 
-	LOGE.Println("createEntryTestThreeNodes")
+	//LOGE.Println("createEntryTestThreeNodes")
 	//if !createEntryTestThreeNodes() {
 	//	LOGE.Println("Failed createEntryTestThreeNodes")
 	//}
 
-	LOGE.Println("testCluster one node")
+	//LOGE.Println("testCluster one node")
 	//if !testCluster(1) {
 	//	LOGE.Println("Failed testCluster one node")
 	//}
 
-	LOGE.Println("testCluster three nodes")
+	//LOGE.Println("testCluster three nodes")
 	//if !testCluster(3) {
 	//	LOGE.Println("Failed testCluster three nodes")
 	//}
 
-	LOGE.Println("testClosed")
+	//LOGE.Println("testClosed")
 	//if !testClosed() {
 	//	LOGE.Println("Failed testClosed")
 	//}
 
-	LOGE.Println("testClosedTwo")
+	//LOGE.Println("testClosedTwo")
 	//if !testClosedTwo() {
 	//	LOGE.Println("Failed testClosedTwo")
 	//}
 
-	LOGE.Println("testStalled")
+	//LOGE.Println("testStalled")
 	//if !testStalled() {
 	//	LOGE.Println("Failed testStalled")
 	//}

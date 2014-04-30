@@ -27,7 +27,7 @@ func main() {
 	nodeID, _ := strconv.Atoi(os.Args[3])
 	var master string
 	if len(os.Args) == 5 {
-		master = os.Args[3]
+		master = os.Args[4]
 	} else {
 		master = ""
 	}
