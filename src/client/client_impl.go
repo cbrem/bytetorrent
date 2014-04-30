@@ -11,6 +11,7 @@ package client
 import (
     "crypto/sha1"
     "errors"
+    "fmt"
     "math/rand"
     "net"
     "net/http"
@@ -377,7 +378,7 @@ func (c *client) downloadFile(download *Download) {
                 // a bad hash for this chunk.
                 download.Reply <- errors.New("Bad torrent file")
                 return
-            else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
+            } else if err := downloadChunk(download, file, chunkNum, trackerReply.Peers, r); err != nil {
                 // Failed to download this chunk.
                 download.Reply <- err
                 return
@@ -421,6 +422,7 @@ func downloadChunk(download *Download, file *os.File, chunkNum int, peers []stri
         h.Write(chunk)
         if string(h.Sum(nil)) != download.Torrent.ChunkHashes[chunkNum] {
             // Chunk had bad hash.
+            fmt.Println("Detected malicious chunk")
             continue
         } else if err := torrent.WriteChunk(download.Torrent, file, chunkNum, chunk); err != nil {
             // Failed to write chunk locally.
