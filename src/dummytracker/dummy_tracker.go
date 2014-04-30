@@ -197,7 +197,8 @@ func (dt *dummyTracker) eventHandler() {
                 }
                 req.Reply <- &trackerproto.RequestReply{
                     Status: trackerproto.OK,
-                    Peers:  peers}
+                    Peers:  peers,
+                    ChunkHash: tor.ChunkHashes[req.Args.Chunk.ChunkNum]}
             }
         case gt := <-dt.getTrackers:
             // Reply with only this node's host:port.
