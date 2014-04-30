@@ -73,13 +73,14 @@ sleep 5
 
 # Start clients.
 NUM_CLIENTS=10
+CLIENT_PRETTY_PRINT=no
 CLIENT_PIPE_BASE=/tmp/client_pipe
 for ((i=0; i<$NUM_CLIENTS; i++))
 do
   PORT=$(((RANDOM % 10000) + 10000))
   PIPE="${CLIENT_PIPE_BASE}${i}"
   mkfifo ${PIPE}
-  ${CLIENT} "localhost:${PORT}" ${TRACKER_HOST_PORTS} < ${PIPE} &
+  ${CLIENT} ${CLIENT_PRETTY_PRINT} "localhost:${PORT}" ${TRACKER_HOST_PORTS} < ${PIPE} &
 done
 sleep 5
 

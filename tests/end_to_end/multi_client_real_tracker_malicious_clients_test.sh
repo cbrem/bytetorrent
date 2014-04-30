@@ -2,6 +2,7 @@
 
 # Variables.
 CLIENT=$GOPATH/bin/client
+CLIENT_PRETTY_PRINT=no
 TRACKER=$GOPATH/bin/trackerrunner
 NUM_GOOD_CLIENTS=5
 NUM_BAD_CLIENTS=5
@@ -72,19 +73,6 @@ else
    exit $?
 fi
 
-# Clean up temporary files from previous times.
-for ((i=0; i<$NUM_CLIENTS; i++))
-do
-  PIPE="${CLIENT_PIPE_BASE}${i}"
-  rm $PIPE
-done
-for ((i=0; i<$NUM_TRACKERS; i++))
-do
-  PIPE="${TRACKER_PIPE_BASE}${i}"
-  rm $PIPE
-done
-rm "${TORRENT_NAME}.torrent"
-
 # Start trackers.
 TRACKER_HOST_PORTS=""
 MASTER_PORT=""
@@ -113,7 +101,7 @@ do
   PORT=$(((RANDOM % 10000) + 10000))
   PIPE="${CLIENT_PIPE_BASE}${i}"
   mkfifo ${PIPE}
-  ${CLIENT} "localhost:${PORT}" ${TRACKER_HOST_PORTS} < ${PIPE} &
+  ${CLIENT} ${CLIENT_PRETTY_PRINT} "localhost:${PORT}" ${TRACKER_HOST_PORTS} < ${PIPE} &
 done
 sleep 5
 

@@ -61,7 +61,7 @@ do
   PORT=$(((RANDOM % 10000) + 10000))
   PIPE="${PIPE_BASE}${i}"
   mkfifo ${PIPE}
-  ${CLIENT} "localhost:${PORT}" "localhost:${TRACKER_PORT}" < ${PIPE} &
+  ${CLIENT} no "localhost:${PORT}" "localhost:${TRACKER_PORT}" < ${PIPE} &
 done
 sleep 2
 
@@ -85,7 +85,7 @@ sleep 2
 DOWNLOADED_FILE_PATH=downloaded_music.mp3
 DOWNLOADER=0
 echo -e "DOWNLOAD ${DOWNLOADED_FILE_PATH} ${TORRENT_NAME}.torrent" >> "${PIPE_BASE}${DOWNLOADER}"
-sleep 45
+sleep 5
 
 # Exit all clients.
 for ((i=0; i<$NUM_CLIENTS; i++))
