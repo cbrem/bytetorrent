@@ -102,6 +102,7 @@ type RequestArgs struct {
 type RequestReply struct {
 	Status
 	Peers  []string // A list of host:port of peers with chunk
+	ChunkHash string // The definitive hash for this chunk
 }
 
 type CreateArgs struct {
