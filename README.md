@@ -38,7 +38,8 @@ Tests
   - <code>test/end\_to\_end/multi\_client\_real\_tracker\_malicious\_clients\_test.sh</code>: 4 honest clients and 5 malicious client serve chunks of a data file to 1 client. A 3-node tracker cluster mediates. The malicious nodes serve chunks with invalid hashes, and the received client must reject these chunks.
   - <code>test/end\_to\_end/multi\_client\_real\_tracker\_fail\_stop\_test.sh</code>: 9 clients serve chunks of a data file to 1 client. A 3-node tracker cluster mediates. One of the tracker nodes fails while the 9 nodes are informing the tracker cluster that they have chunks of the data file. This node does not recover.
   - <code>test/end\_to\_end/multi\_client\_real\_tracker\_fail\_stall\_test.sh</code>: 9 clients serve chunks of a data file to 1 client. A 3-node tracker cluster mediates. One of the tracker nodes goes offline while the 9 nodes are informing the tracker cluster that they have chunks of the data file. This node recovers after 5 seconds and is reintegrated into the cluster.
+  - <code>test/trackertest/trackertest.sh</code>: Runs 11 tests to check that the paxos implementation works correctly. Tests include: a single tracker sending many messages to the cluster; dualing leaders; shutdown nodes for fail-stop testing; pause and resume a node.
 
 Progress Since Grading Meeting:
 -------------------------------
-  - TODO
+  - Updated the testClosed and testClosedTwo functions in tests/trackertester/trackertester.go. The tracker now passes every time.
