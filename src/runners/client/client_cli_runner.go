@@ -155,16 +155,7 @@ func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.
             }
 
         case "EXIT":
-            // Save the client's state to a file.
-            if localFilesBytes, err := json.Marshal(localFiles); err != nil {
-                //fmt.Println("Could not save client state:", err)
-            } else if err := ioutil.WriteFile(SAVE_PATH, localFilesBytes, MODE); err != nil {
-                //fmt.Println("Could not save client state:", err)
-            } else {
-                fmt.Println("Successfully saved client state")
-            }
-
-            // Quit.
+            // Exit the client.
             fmt.Println("Exiting")
             return
 
@@ -177,24 +168,12 @@ func processInputs(c client.Client, localFiles map[torrentproto.ID]*clientproto.
     }
 }
 
-// TODO: if saving state doesn't work correctly, check how we're creating
-// localFiles here, passing it into client, and then assuming that it
-// will see all changed up until we serialize it in processInputs
 func main() {
-    // Load saved localFiles, if they exist.
-    var localFiles map[torrentproto.ID]*clientproto.LocalFile
-    if savedBytes, err := ioutil.ReadFile(SAVE_PATH); err != nil {
-        //fmt.Println("Could not find saved state:", err)
-        localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
-    } else if err := json.Unmarshal(savedBytes, localFiles); err != nil {
-        //fmt.Println("Could not read saved state:", err)
-        localFiles = make(map[torrentproto.ID]*clientproto.LocalFile)
-    }
+    // Don't use any saved state.
+    localFiles := make(map[torrentproto.ID]*clientproto.LocalFile)
 
     // Get hostports from command line.
     // First hostport is for Client, and remainder are for Trackers.
-    //
-    // TODO: make sure that the indices in the os.Args are correct
     if len(os.Args) < 4 {
         fmt.Println(USAGE)
         return

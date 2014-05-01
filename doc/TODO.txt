@@ -20,6 +20,12 @@
         * tracker_runner should be able to call tracker_impl's DebugStall method with either:
             - 0 for close
             - n > 0 to stall
+    - close files...everywhere
+    - if torrent.Register fails, should we give some info about the type of the error that occured?
+    - cache chunks on the client?
+    - remove dummytracker/rpc?
+    - in client, check if file already exists on download/offer?
+    - this Client can't self-report, because it doesn't know what Tracker to report to. And it can't know this tracker unless the Client that requested the chunk passes that Torrent...or we somehow keep a record locally of which Trackers think that this Client has this chunk
 
 * Current bugs:
     NONE

@@ -43,6 +43,4 @@ type Client interface {
     // Close throws an error if it is not able to write the Client's state to a
     // file.
     Close() error
-
-    // TODO: expose which chunks from which clients the client has
 }

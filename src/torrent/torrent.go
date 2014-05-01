@@ -1,7 +1,5 @@
 // This file contains utility funtions for creating and manipulating Torrents.
 
-// TODO: currently, I don't think we close any files...
-
 package torrent
 
 import (
@@ -113,9 +111,6 @@ func Save(t torrentproto.Torrent, path string) error {
 //   * Otherwise, the Torrent is valid and can be used. Additionally, its
 //     ID is uniquely tied to the Torrent on the Tracker with which it is
 //     registered.
-//
-// TODO: should this return info about what the error was?...or otherwise help
-// us to recover in the case that we have the wrong list of tracker nodes?
 func Register(t torrentproto.Torrent) error {
     // Attempt to contact one of the tracker nodes and create an entry for this
     // ID.
@@ -140,8 +135,6 @@ func Register(t torrentproto.Torrent) error {
                 case trackerproto.InvalidTrackers:
                     // Could not create Torrent on Tracker, because given
                     // tracker nodes do not form a cluster.
-
-                    // TODO: what should we do here? retry with correct trackers?
                     return errors.New("Invalid trackers")
                 }
             }

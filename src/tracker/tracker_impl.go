@@ -1,26 +1,5 @@
 package tracker
 
-// TODO:
-//   - suggestions from Connor:
-//   	- can we get rid of numChunks now that we're storing torrents?
-//   	- rename operation Remove to Delete
-//   	- where are we creating the empty maps for t.peer[chunkID]?
-//        when we create an entry for the torrent, or when we try to add
-//        hostPorts?
-//           ANS: It gets created in the commitOp function,
-//                when we try to add a hostPort to it
-//   	- in eventHandler, in a few places, we're checking whether a
-//        torrentID is in torrents, and then assuming that corresponding
-//        chunkIDs will be in peers. Is this safe? I think it is, assuming
-//        a perfect tracker implementation...but might we want to actually
-//        check that chunkIDs are there, while we're debugging?
-//           ANS: In an interesting manner, we don't actually assume this
-//                We check if torrentID is in torrents, and if it is then
-//                we iterate over the (hostPort, _) pairs in peers[chunkID].
-//                However, if chunkID is NOT in peers, then go's default
-//                behavior is to return the nil value (an empty map).
-//                Thus, we're iterating over nothing (which is fine).
-
 import (
 	"container/list"
 	"net"
@@ -917,7 +896,6 @@ func (t *trackerServer) paxosHandler() {
 			if com.Status == trackerproto.OK {
 				t.pendingMut.Lock()
 				if t.pendingOps.Len() > 0 {
-					// TODO
 					// Skip the prepare phase
 					initPaxos <- struct{}{}
 				} else {

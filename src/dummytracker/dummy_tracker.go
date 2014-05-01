@@ -70,9 +70,6 @@ func New(hostPort string) (DummyTracker, error) {
     // Attempt to service connections on the given port.
     // Then, configure this TrackerServer to receive RPCs over HTTP on a
     // tracker.Tracker interface.
-    //
-    // TODO: update rpc.Register to use tracker.WrapRemote as soon as that
-    // compiles
     if ln, lnErr := net.Listen("tcp", hostPort); lnErr != nil {
         return nil, lnErr
     } else if regErr := rpc.RegisterName("RemoteTracker", Wrap(dt)); regErr != nil {

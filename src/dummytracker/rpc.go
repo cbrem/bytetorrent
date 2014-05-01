@@ -1,6 +1,3 @@
-// TODO: this whole file should be temporary until names get worked out
-// in tracker/rpc.go and we can implement one of those
-
 package dummytracker
 
 import (
