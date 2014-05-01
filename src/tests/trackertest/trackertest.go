@@ -737,13 +737,6 @@ func testStalled() bool {
 	// Stall for 5 seconds
 	LOGE.Println("Stalling tracker")
 	cluster[2].cmd.Process.Signal(syscall.SIGSTOP)
-	/*
-	if _, err := fmt.Fprintln(cluster[2].in, "5"); err != nil {
-		LOGE.Println("Could not stall node")
-		closeCluster(cluster)
-		return false
-	}
-	*/
 
 	doneChan := make(chan struct{})
 
@@ -769,9 +762,7 @@ func testStalled() bool {
 		fin++
 	}
 
-	// Call something on the stalled tracker
-	// The call will block until the tracker comes back online
-	LOGE.Println("Restarting Tracker")
+	LOGE.Println("Resuming Tracker")
 	cluster[2].cmd.Process.Signal(syscall.SIGCONT)
 	LOGE.Println("Call on stalled tracker")
 	reply, err = cluster[2].ConfirmChunk(chunk, "apple")
