@@ -41,4 +41,4 @@ Tests
 
 Progress Since Grading Meeting:
 -------------------------------
-  - TODO
+  - Updated the testClosed and testClosedTwo functions in tests/trackertester/trackertester.go. The tracker now passes every time.
