@@ -1,5 +1,30 @@
 package tracker
 
+/* Implementation of a Tracker Server:
+ *
+ * Data Storage:
+ *   torrents   map[torrentproto.ID]torrentproto.Torrent
+ *     - Maps the torrentID to the torrent's information
+ *   peers      map[torrentproto.ChunkID](map[string](struct{}))
+ *     - Maps the chunkID (which includes torrentID and chunkNum)
+ *       to a map whose keys are the clients that own that torrent
+ *
+ * Goroutines:
+ *   eventHandler
+ *     - rpc's send the args to the eventHandler to deal with
+ *   paxosHandler
+ *     - eventHandler sends paxosHandler any pending operations
+ *     - broadcasts the paxos messages to the other nodes in the cluster
+ *
+ * Other Notes:
+ * - paxosHandler uses exponential back-off to deal with dualing leaders
+ * - Upon receiving a paxos message for a "future" seqNum,
+ *   the tracker pings the other nodes, asking for any committed actions
+ *   that it missed.
+ * - Paxos Cluster is initialized using the master/slave model
+ *   (as in storage server)
+ */
+
 import (
 	"container/list"
 	"net"
@@ -765,7 +790,7 @@ func (t *trackerServer) sendMess(id int, mess *PaxosBroadcast) {
 // This is the function that broadcasts paxos messages and collects replies
 // Most of the paxos-leader logic takes place here
 func (t *trackerServer) paxosHandler() {
-	initPaxos := make(chan struct{})
+	initPaxos := make(chan struct{}, t.numNodes)
 
 	// reply channels
 	prepareReply := make(chan *PaxosReply)
