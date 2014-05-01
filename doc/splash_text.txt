@@ -1,3 +1,0 @@
-If you can't trust the peers, why trust the protocol?
-For when BitTorrent isn't sketchy enough!
-Questionable security to match the questonable legality.
